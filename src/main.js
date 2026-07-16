@@ -222,6 +222,19 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, '../dist/renderer/index.html'));
 
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    if (!params.isEditable) return;
+    Menu.buildFromTemplate([
+      { role: 'undo', enabled: params.editFlags.canUndo },
+      { role: 'redo', enabled: params.editFlags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', enabled: params.editFlags.canCut },
+      { role: 'copy', enabled: params.editFlags.canCopy },
+      { role: 'paste', enabled: params.editFlags.canPaste },
+      { role: 'selectAll' },
+    ]).popup({ window: mainWindow });
+  });
+
   mainWindow.on('closed', () => {
     disconnectCDP();
     mainWindow = null;
@@ -234,6 +247,18 @@ function createWindow() {
         { label: 'Export Requests...', accelerator: 'CmdOrCtrl+E', click: () => mainWindow?.webContents.send('export-requests') },
         { type: 'separator' },
         { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
       ],
     },
     {
@@ -580,23 +605,31 @@ ipcMain.handle('save-file', async (_event, { defaultPath, content }) => {
   }
 });
 
-ipcMain.handle('start-copilot', async (_event, { prompt }) => {
+ipcMain.handle('select-copilot-directory', async () => {
   if (!mainWindow) return { ok: false, error: 'No window available' };
-  if (copilotProcess) return { ok: false, error: 'A Copilot task is already running.' };
-  if (typeof prompt !== 'string' || !prompt.trim()) return { ok: false, error: 'The prompt is empty.' };
-
   const selected = await dialog.showOpenDialog(mainWindow, {
     title: 'Select the code directory for Copilot',
     properties: ['openDirectory', 'createDirectory'],
   });
   if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+  return { ok: true, directory: selected.filePaths[0] };
+});
+
+ipcMain.handle('start-copilot', async (_event, { prompt, directory, continueSession = false }) => {
+  if (!mainWindow) return { ok: false, error: 'No window available' };
+  if (copilotProcess) return { ok: false, error: 'A Copilot task is already running.' };
+  if (typeof prompt !== 'string' || !prompt.trim()) return { ok: false, error: 'The prompt is empty.' };
+  let validDirectory = false;
+  try { validDirectory = typeof directory === 'string' && fs.statSync(directory).isDirectory(); } catch (_) {}
+  if (!validDirectory) {
+    return { ok: false, error: 'Select a valid code directory.' };
+  }
 
   const executablePath = findExecutableOnPath(['copilot']);
   if (!executablePath) {
     return { ok: false, error: 'GitHub Copilot CLI was not found on PATH. Install it and sign in, then restart Network Watch.' };
   }
 
-  const directory = selected.filePaths[0];
   const approval = await dialog.showMessageBox(mainWindow, {
     type: 'warning',
     buttons: ['Send to Copilot', 'Cancel'],
@@ -609,13 +642,20 @@ ipcMain.handle('start-copilot', async (_event, { prompt }) => {
   if (approval.response !== 0) return { ok: false, canceled: true };
 
   try {
-    const child = spawn(executablePath, [
+    const args = [
       '--autopilot',
       '--allow-all',
       '--max-autopilot-continues', '10',
       '--no-color',
-      '-p', prompt,
-    ], { cwd: directory, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    ];
+    if (continueSession) args.push('--continue');
+    args.push('-p', prompt);
+    const child = spawn(executablePath, args, {
+      cwd: directory,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
+    });
     copilotProcess = child;
     const send = (kind, data = {}) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('copilot-event', { kind, ...data });
@@ -639,8 +679,27 @@ ipcMain.handle('start-copilot', async (_event, { prompt }) => {
 
 ipcMain.handle('stop-copilot', async () => {
   if (!copilotProcess) return { ok: true };
-  copilotProcess.kill('SIGTERM');
-  return { ok: true };
+  const child = copilotProcess;
+  try {
+    if (process.platform === 'win32') {
+      const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
+      killer.on('error', () => child.kill());
+    } else if (child.pid) {
+      process.kill(-child.pid, 'SIGTERM');
+      const forceKill = setTimeout(() => {
+        if (copilotProcess === child && child.pid) {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch (_) {}
+        }
+      }, 3000);
+      forceKill.unref();
+    } else {
+      child.kill('SIGTERM');
+    }
+    return { ok: true };
+  } catch (error) {
+    if (error.code === 'ESRCH') return { ok: true };
+    return { ok: false, error: error.message };
+  }
 });
 
 ipcMain.handle('get-extension-data', async () => ({ ok: true, state: extensionStateSnapshot() }));

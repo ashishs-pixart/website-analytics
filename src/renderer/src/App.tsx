@@ -4,7 +4,7 @@ import { ExportModal, type ExportFormat } from './components/ExportModal';
 import { HelpModal } from './components/HelpModal';
 import { InspectDashboard } from './components/InspectDashboard';
 import { InspectExportModal } from './components/InspectExportModal';
-import { CopilotTerminal } from './components/CopilotTerminal';
+import { CopilotSidebar } from './components/CopilotSidebar';
 import { ModeBar, type AppMode } from './components/ModeBar';
 import { RequestDetails } from './components/RequestDetails';
 import { RequestTable } from './components/RequestTable';
@@ -48,9 +48,12 @@ export function App() {
   const [detailWidth, setDetailWidth] = useState('43%');
   const [showExport, setShowExport] = useState(false);
   const [showInspectExport, setShowInspectExport] = useState(false);
+  const [inspectPromptTarget, setInspectPromptTarget] = useState<'export' | 'copilot'>('export');
   const [includeMeaningfulRequests, setIncludeMeaningfulRequests] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [copilotSession, setCopilotSession] = useState<{ directory: string; output: string; running: boolean } | null>(null);
+  const [showCopilot, setShowCopilot] = useState(false);
+  const [copilotSession, setCopilotSession] = useState({ directory: '', output: '', running: false, stopping: false });
+  const [copilotChatDraft, setCopilotChatDraft] = useState('');
   const [extensionState, setExtensionState] = useState<ExtensionState>(EMPTY_EXTENSION_STATE);
   const [screenshotFeedback, setScreenshotFeedback] = useState<Record<string, string>>({});
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
@@ -222,7 +225,6 @@ export function App() {
     const eventCount = scope.events ? extensionState.recordings.reduce((total, recording) => total + recording.actions.length, 0) : 0;
     if (!reviewed.length && !eventCount) return;
     setExporting(true);
-    setCopilotSession({ directory: 'Select a code directory…', output: '', running: true });
     try {
       const result = await window.cdp.saveFile({
         defaultPath: `website-improvements-${new Date().toISOString().replace(/[:.]/g, '-')}.md`,
@@ -239,47 +241,68 @@ export function App() {
     }
   }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, screenshotFeedback, showToast]);
 
-  const sendInspectPromptToCopilot = useCallback(async (scope: { breakpoints: boolean; events: boolean }) => {
+  const selectCopilotDirectory = useCallback(async () => {
+    const result = await window.cdp.selectCopilotDirectory();
+    if (result.ok) setCopilotSession(current => ({ ...current, directory: result.directory }));
+    else if (!result.canceled) showToast(result.error || 'Could not select directory');
+  }, [showToast]);
+
+  const launchCopilotPrompt = useCallback(async (prompt: string, continueSession = false) => {
+    setCopilotSession(current => ({ ...current, output: `${current.output}${current.output ? '\n\n' : ''}> ${continueSession ? prompt : 'Generated improvement prompt'}\n\n`, running: true, stopping: false }));
+    try {
+      const result = await window.cdp.startCopilot({ prompt, directory: copilotSession.directory, continueSession });
+      if (!result.ok) {
+        setCopilotSession(current => ({ ...current, running: false, stopping: false }));
+        if (!result.canceled) showToast(result.error || 'Could not start Copilot');
+      }
+    } catch (error) {
+      setCopilotSession(current => ({ ...current, output: `${current.output}Error: ${error instanceof Error ? error.message : String(error)}\n`, running: false, stopping: false }));
+    }
+  }, [copilotSession.directory, showToast]);
+
+  const makeScopedInspectPrompt = useCallback((scope: { breakpoints: boolean; events: boolean }) => {
     const reviewed = scope.breakpoints ? extensionState.screenshots.filter((screenshot) => {
       const elements = screenshot.elements?.length ? screenshot.elements : screenshot.element ? [screenshot.element] : [];
       return screenshotFeedback[screenshot.id]?.trim() || elements.some((_element, index) => elementFeedback[elementFeedbackId(screenshot.id, index)]?.trim());
     }) : [];
     const eventCount = scope.events ? extensionState.recordings.reduce((total, recording) => total + recording.actions.length, 0) : 0;
-    if (!reviewed.length && !eventCount) return;
-    setExporting(true);
-    try {
-      const prompt = makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests, includeMeaningfulRequests, elementFeedback, scope);
-      const result = await window.cdp.startCopilot({ prompt });
-      if (result.ok) {
-        setShowInspectExport(false);
-        setCopilotSession(current => ({ directory: result.directory, output: current?.output || '', running: current?.running ?? true }));
-      } else if (!result.canceled) {
-        setCopilotSession(null);
-        showToast(result.error || 'Could not start Copilot');
-      } else {
-        setCopilotSession(null);
-      }
-    } finally {
-      setExporting(false);
-    }
-  }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, screenshotFeedback, showToast]);
+    if (!reviewed.length && !eventCount) return '';
+    return makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests, includeMeaningfulRequests, elementFeedback, scope);
+  }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, screenshotFeedback]);
+
+  const addScopedPromptToChat = useCallback((scope: { breakpoints: boolean; events: boolean }) => {
+    const prompt = makeScopedInspectPrompt(scope);
+    if (!prompt) return;
+    setCopilotChatDraft(prompt);
+    setShowInspectExport(false);
+    setShowCopilot(true);
+  }, [makeScopedInspectPrompt]);
+
+  const runInspectPromptInCopilot = useCallback(() => {
+    const prompt = makeScopedInspectPrompt({ breakpoints: true, events: true });
+    if (prompt) launchCopilotPrompt(prompt);
+  }, [launchCopilotPrompt, makeScopedInspectPrompt]);
 
   useEffect(() => window.cdp.onCopilotEvent((event) => {
     if (event.kind === 'output') {
-      setCopilotSession(current => current ? { ...current, output: current.output + event.text } : current);
+      setCopilotSession(current => ({ ...current, output: current.output + event.text }));
     } else if (event.kind === 'error') {
-      setCopilotSession(current => current ? { ...current, output: `${current.output}\nError: ${event.error}\n`, running: false } : current);
+      setCopilotSession(current => ({ ...current, output: `${current.output}\nError: ${event.error}\n`, running: false, stopping: false }));
     } else {
-      setCopilotSession(current => current ? {
+      setCopilotSession(current => ({
         ...current,
         output: `${current.output}\nCopilot exited${event.code == null ? '' : ` with code ${event.code}`}.${event.signal ? ` Signal: ${event.signal}.` : ''}\n`,
         running: false,
-      } : current);
+        stopping: false,
+      }));
     }
   }), []);
 
   const openModeExport = useCallback(() => {
-    if (mode === 'inspect') setShowInspectExport(true);
+    if (mode === 'inspect') {
+      setInspectPromptTarget('export');
+      setShowInspectExport(true);
+    }
     else setShowExport(true);
   }, [mode]);
 
@@ -397,6 +420,8 @@ export function App() {
           onElementFeedbackChange={changeElementFeedback}
           onRefresh={loadExtensionData}
           onClear={clearExtensionData}
+          onSetupCopilot={() => setShowCopilot(true)}
+          copilotConfigured={Boolean(copilotSession.directory)}
         />
       )}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
@@ -424,15 +449,31 @@ export function App() {
           onActionFeedbackChange={changeActionFeedback}
           onElementFeedbackChange={changeElementFeedback}
           onClose={() => setShowInspectExport(false)}
-          onExport={exportInspectPrompt}
-          onSendToCopilot={sendInspectPromptToCopilot}
+          onExport={inspectPromptTarget === 'copilot' ? addScopedPromptToChat : exportInspectPrompt}
+          submitLabel={inspectPromptTarget === 'copilot' ? 'Add to Chat' : 'Export prompt'}
         />
       )}
-      {copilotSession && (
-        <CopilotTerminal
+      {showCopilot && (
+        <CopilotSidebar
           {...copilotSession}
-          onStop={() => window.cdp.stopCopilot()}
-          onClose={() => setCopilotSession(null)}
+          canRun={Boolean(extensionState.recordings.length || Object.values(screenshotFeedback).some(value => value.trim()) || Object.values(elementFeedback).some(value => value.trim()))}
+          chatDraft={copilotChatDraft}
+          onChatDraftChange={setCopilotChatDraft}
+          onSelectDirectory={selectCopilotDirectory}
+          onRun={runInspectPromptInCopilot}
+          onGeneratePrompt={() => {
+            setInspectPromptTarget('copilot');
+            setShowInspectExport(true);
+          }}
+          onSendChat={(message) => launchCopilotPrompt(message, true)}
+          onStop={async () => {
+            setCopilotSession(current => ({ ...current, stopping: true, output: `${current.output}\nStopping Copilot CLI…\n` }));
+            const result = await window.cdp.stopCopilot();
+            if (!result.ok) {
+              setCopilotSession(current => ({ ...current, stopping: false, output: `${current.output}Could not stop Copilot: ${result.error || 'Unknown error'}\n` }));
+            }
+          }}
+          onClose={() => setShowCopilot(false)}
         />
       )}
       <Toast toast={toast} />

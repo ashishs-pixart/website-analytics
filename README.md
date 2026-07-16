@@ -159,15 +159,17 @@ List my Network Watch recordings. Choose the most recent REC-* recording, replay
 
 MCP replay jobs are claimed by the extension on its local alarm cycle, which can take up to about 30 seconds. `replay_recording` waits for completion by default; do not close Network Watch, the extension, or the active website tab while it is running.
 
-#### Send an improvement prompt from Network Watch
+#### Run Copilot from the Inspect sidebar
 
 1. Install GitHub Copilot CLI, run `copilot login`, and restart Network Watch so the desktop app can find the `copilot` command on `PATH`.
-2. In **Inspect**, capture breakpoints or journeys, add change notes, and click **Export**.
-3. In **Create improvement prompt**, select the evidence to include and click **Send to Copilot**.
-4. Choose the directory containing the code that Copilot may edit.
-5. Review the native permission warning and confirm. Network Watch starts Copilot CLI in that directory and shows its live output in an in-app terminal window.
+2. In **Inspect**, click **Setup Copilot**. A sidebar opens on the right.
+3. Click **Select working directory** and choose the directory containing the code that Copilot may edit.
+4. Capture breakpoints or journeys and add visual change notes where appropriate.
+5. Click **Generate Prompt**, choose the breakpoint and event evidence in the familiar export modal, then click **Add to Chat**. Review or edit the generated prompt in the sidebar chat box before pressing **Send**. Use **Run all evidence** when no review is needed.
+6. Review the native permission warning and confirm. Network Watch starts Copilot CLI in that directory and streams its live output into the sidebar.
+7. After a run finishes, use the chat box at the bottom for follow-up instructions. Follow-ups continue the latest Copilot CLI session in the selected repository.
 
-The task uses bounded autopilot with a maximum of 10 continuations. It grants Copilot permission to edit files and run commands, so select only a trusted repository and review the resulting changes. **Stop** terminates the running CLI process; **Close** becomes available when it exits.
+The selected directory and terminal output remain available if you close and reopen the sidebar during the same Network Watch session. The task uses bounded autopilot with a maximum of 10 continuations. It grants Copilot permission to edit files and run commands, so select only a trusted repository and review the resulting changes. **Stop** terminates the running CLI process.
 
 If Network Watch says the CLI is missing, verify `copilot --version` works in a new terminal, then fully quit and restart Network Watch. GUI applications inherit their `PATH` when they launch.
 

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('cdp', {
   attachTarget: (opts) => ipcRenderer.invoke('attach-target', opts),
   getResponseBody: (opts) => ipcRenderer.invoke('get-response-body', opts),
   saveFile: (opts) => ipcRenderer.invoke('save-file', opts),
+  selectCopilotDirectory: () => ipcRenderer.invoke('select-copilot-directory'),
   startCopilot: (opts) => ipcRenderer.invoke('start-copilot', opts),
   stopCopilot: () => ipcRenderer.invoke('stop-copilot'),
   startBrowserDebug: (opts) => ipcRenderer.invoke('start-browser-debug', opts),

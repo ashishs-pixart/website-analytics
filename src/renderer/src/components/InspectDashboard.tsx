@@ -15,6 +15,8 @@ type InspectDashboardProps = {
   onElementFeedbackChange: (id: string, value: string) => void;
   onRefresh: () => void;
   onClear: () => void;
+  onSetupCopilot: () => void;
+  copilotConfigured: boolean;
 };
 
 function relatedRequests(recording: ExtensionRecording, actionIndex: number, requests: NetworkRequest[]) {
@@ -29,7 +31,7 @@ function relatedRequests(recording: ExtensionRecording, actionIndex: number, req
   });
 }
 
-export function InspectDashboard({ state, feedback, actionFeedback, elementFeedback, networkRequests, onFeedbackChange, onActionFeedbackChange, onElementFeedbackChange, onRefresh, onClear }: InspectDashboardProps) {
+export function InspectDashboard({ state, feedback, actionFeedback, elementFeedback, networkRequests, onFeedbackChange, onActionFeedbackChange, onElementFeedbackChange, onRefresh, onClear, onSetupCopilot, copilotConfigured }: InspectDashboardProps) {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [requestModal, setRequestModal] = useState<{ recording: ExtensionRecording; actionIndex: number } | null>(null);
   const previewScreenshot = state.screenshots.find((screenshot) => screenshot.id === previewId);
@@ -47,6 +49,7 @@ export function InspectDashboard({ state, feedback, actionFeedback, elementFeedb
           <p>Local bridge: 127.0.0.1:{state.bridgePort} · {state.screenshots.length} screenshot{state.screenshots.length === 1 ? '' : 's'} · {state.recordings.length} recording{state.recordings.length === 1 ? '' : 's'}</p>
         </div>
         <div className="inspect-actions">
+          <button className="btn btn-primary" onClick={onSetupCopilot}>{copilotConfigured ? 'Show Copilot' : 'Setup Copilot'}</button>
           <button className="btn btn-secondary" onClick={onRefresh}>Refresh</button>
           <button className="btn btn-ghost" onClick={onClear} disabled={!state.screenshots.length && !state.recordings.length}>Clear extension data</button>
         </div>
@@ -112,7 +115,9 @@ export function InspectDashboard({ state, feedback, actionFeedback, elementFeedb
           <p>Select elements at any time. Start responsive simulation only when you want to capture the visible viewport at a breakpoint.</p>
         </section>
       ) : (
-        <section className="screenshot-grid">
+        <section className="screenshot-section">
+          <div className="screenshot-section-heading"><div><h2>Responsive screenshots</h2><p>Breakpoint captures and visual change notes.</p></div><span>{state.screenshots.length}</span></div>
+          <div className="screenshot-grid">
           {state.screenshots.map((screenshot) => (
             <article className="screenshot-card" key={screenshot.id}>
               <button className="screenshot-preview" onClick={() => setPreviewId(screenshot.id)} aria-label={`Open screenshot preview for ${screenshot.title || screenshot.url}`}>
@@ -138,6 +143,7 @@ export function InspectDashboard({ state, feedback, actionFeedback, elementFeedb
               </div>
             </article>
           ))}
+          </div>
         </section>
       )}
     </main>
