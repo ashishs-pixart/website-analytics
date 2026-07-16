@@ -8,9 +8,9 @@ A production-ready Electron desktop app for inspecting browser network traffic t
 - Live request table with method, status, type, URL, size, and duration.
 - Filter by URL/method/status, resource type, and errors only.
 - Inspect request headers, response headers, request body, response body, timing, raw event data, and WebSocket frames.
-- Export the currently filtered traffic as an importable Postman collection or a custom JSON file with selected request, response, header, payload, and timing fields.
+- Export the currently filtered traffic as an importable Postman JSON collection or a readable Markdown (`.md`) file with selected request, response, header, payload, and timing fields.
 - Use the companion Chrome extension to record/replay journeys and regenerate their network traffic.
-- Simulate five fitted desktop breakpoints, capture full-page screenshots with selected-element HTML/CSS metadata, correlate requests to recorded actions, and export an LLM-ready improvement prompt.
+- Simulate eleven fitted desktop, tablet, and mobile breakpoints, capture visible-viewport screenshots with selected-element HTML/CSS metadata, correlate requests to recorded actions, and export an LLM-ready improvement prompt.
 - Secure Electron setup with `contextIsolation: true` and no renderer Node integration.
 
 ## Install

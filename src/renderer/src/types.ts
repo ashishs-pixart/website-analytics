@@ -79,11 +79,24 @@ export type ElementMetadata = {
   html: string;
   cssRules: string[];
   computedStyles: Record<string, string>;
+  rect?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    pageX: number;
+    pageY: number;
+    viewportWidth: number;
+    viewportHeight: number;
+    visible: boolean;
+  };
 };
 
 export type ExtensionScreenshot = {
   id: string;
   dataUrl: string;
+  mimeType?: string;
+  byteSize?: number;
   width: number;
   height: number;
   url: string;
@@ -93,13 +106,14 @@ export type ExtensionScreenshot = {
   contentWidth?: number;
   contentHeight?: number;
   element: ElementMetadata | null;
+  elements?: ElementMetadata[];
 };
 
 export type RecordedAction = {
   id: string;
   sourceActionId?: string;
   frameId?: number;
-  type: 'click' | 'input' | 'change' | 'keypress';
+  type: 'click' | 'input' | 'change' | 'keypress' | 'scroll';
   selector: string;
   timestamp: number;
   delayMs: number;
@@ -110,8 +124,45 @@ export type RecordedAction = {
   key?: string;
   code?: string;
   source?: string;
+  locator?: {
+    selector?: string;
+    tagName?: string;
+    id?: string;
+    testId?: string;
+    name?: string;
+    role?: string;
+    ariaLabel?: string;
+    href?: string;
+    text?: string;
+  };
+  inputType?: string;
   checked?: boolean;
   pageUrl?: string;
+  startUrl?: string;
+  frameUrl?: string;
+  expectedUrl?: string;
+  expectedResultUrl?: string | null;
+  resultUrl?: string;
+  urlChanged?: boolean;
+  urlCorrection?: {
+    fromUrl: string;
+    toUrl: string;
+    succeeded: boolean;
+    error?: string;
+  } | null;
+  clientX?: number;
+  clientY?: number;
+  pageX?: number;
+  pageY?: number;
+  viewportWidth?: number;
+  viewportHeight?: number;
+  scrollX?: number;
+  scrollY?: number;
+  outcome?: 'success' | 'failed';
+  replayError?: string;
+  executionMethod?: 'cdp-trusted-click' | 'dom-click-fallback' | 'scroll' | 'input-value' | 'dom-key-event';
+  executionWarning?: string;
+  resolutionMethod?: string;
 };
 
 export type ExtensionRecording = {
@@ -123,6 +174,11 @@ export type ExtensionRecording = {
   startedAt: string;
   stoppedAt: string;
   actions: RecordedAction[];
+  summary?: {
+    successfulActions: number;
+    failedActions: number;
+    totalActions: number;
+  };
 };
 
 export type ExtensionState = {

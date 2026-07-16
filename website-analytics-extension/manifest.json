@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Website Analytics for Network Watch",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "description": "Record and replay website journeys, simulate responsive breakpoints, and send annotated screenshots to Network Watch.",
   "permissions": [
     "activeTab",
@@ -26,6 +26,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
+      "css": ["simulation.css"],
       "run_at": "document_start",
       "all_frames": true,
       "match_about_blank": true

@@ -1,0 +1,53 @@
+#nw-simulation-frame {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483645 !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  border: 5px solid #35a7ff !important;
+  border-radius: 2px !important;
+  background: transparent !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.92),
+    inset 0 0 28px rgba(53, 167, 255, 0.18) !important;
+  pointer-events: none !important;
+}
+
+#nw-simulation-frame[hidden] {
+  display: none !important;
+}
+
+html.nw-element-picker-active,
+html.nw-element-picker-active * {
+  cursor: crosshair !important;
+}
+
+#nw-simulation-label {
+  position: absolute !important;
+  top: 10px !important;
+  left: 10px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 30px !important;
+  padding: 5px 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  border-radius: 7px !important;
+  background: rgba(7, 17, 31, 0.92) !important;
+  color: #ffffff !important;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.32) !important;
+  font: 700 13px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  letter-spacing: 0.01em !important;
+  white-space: nowrap !important;
+}
+
+#nw-simulation-label::before {
+  content: "" !important;
+  width: 8px !important;
+  height: 8px !important;
+  margin-right: 7px !important;
+  border-radius: 50% !important;
+  background: #35a7ff !important;
+  box-shadow: 0 0 8px rgba(53, 167, 255, 0.9) !important;
+}

@@ -61,7 +61,7 @@ export function makePostmanCollection(requests: NetworkRequest[]) {
 }
 
 export function makeSelectedFieldsExport(requests: NetworkRequest[], selectedFields: Set<ExportField>) {
-  return {
+  const data = {
     exportedAt: new Date().toISOString(),
     source: 'Network Inspector',
     fields: EXPORT_FIELDS.filter((field) => selectedFields.has(field.id)).map((field) => field.id),
@@ -102,4 +102,20 @@ export function makeSelectedFieldsExport(requests: NetworkRequest[], selectedFie
       return exported;
     }),
   };
+  return [
+    '# Network Watch export',
+    '',
+    `- Exported: ${data.exportedAt}`,
+    `- Fields: ${data.fields.join(', ')}`,
+    `- Requests: ${data.requests.length}`,
+    '',
+    ...data.requests.flatMap((request, index) => [
+      `## Request ${index + 1}`,
+      '',
+      '```json',
+      JSON.stringify(request, null, 2),
+      '```',
+      '',
+    ]),
+  ].join('\n');
 }

@@ -88,7 +88,7 @@ function startExtensionBridge() {
     request.on('data', chunk => {
       if (tooLarge) return;
       body += chunk;
-      if (body.length > 20 * 1024 * 1024) {
+      if (body.length > 32 * 1024 * 1024) {
         tooLarge = true;
         sendJson(413, { ok: false, error: 'Payload too large' });
         request.destroy();
@@ -466,9 +466,15 @@ ipcMain.handle('get-response-body', async (_event, { requestId }) => {
 
 ipcMain.handle('save-file', async (_event, { defaultPath, content }) => {
   if (!mainWindow) return { ok: false, error: 'No window available' };
+  const extension = path.extname(defaultPath).toLowerCase();
+  const preferredFilter = extension === '.md'
+    ? { name: 'Markdown files', extensions: ['md'] }
+    : extension === '.json'
+      ? { name: 'JSON files', extensions: ['json'] }
+      : { name: 'HAR files', extensions: ['har'] };
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath,
-    filters: [{ name: 'HAR files', extensions: ['har'] }, { name: 'JSON files', extensions: ['json'] }, { name: 'Markdown files', extensions: ['md'] }, { name: 'All files', extensions: ['*'] }],
+    filters: [preferredFilter, { name: 'All files', extensions: ['*'] }],
   });
   if (result.canceled || !result.filePath) return { ok: false, canceled: true };
   try {

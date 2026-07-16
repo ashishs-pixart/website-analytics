@@ -55,7 +55,7 @@ export function ExportModal({ requestCount, scopeLabel, exporting, onClose, onEx
           </label>
           <label className={`export-option ${format === 'selected' ? 'selected' : ''}`}>
             <input type="radio" name="export-format" value="selected" checked={format === 'selected'} onChange={() => setFormat('selected')} />
-            <span><strong>Selected fields</strong><small>A JSON file containing only the data you choose below.</small></span>
+            <span><strong>Selected fields</strong><small>A Markdown file containing only the data you choose below.</small></span>
           </label>
         </fieldset>
 

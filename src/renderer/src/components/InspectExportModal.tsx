@@ -1,19 +1,28 @@
-import { useEffect } from 'react';
-import type { ExtensionRecording, ExtensionScreenshot } from '../types';
+import { useEffect, useRef, useState } from 'react';
+import type { ExtensionRecording, ExtensionScreenshot, NetworkRequest } from '../types';
+import { elementFeedbackId, meaningfulRequestInsights } from '../utils/inspectExport';
 
 type InspectExportModalProps = {
   screenshots: ExtensionScreenshot[];
   feedback: Record<string, string>;
   recordings: ExtensionRecording[];
   actionFeedback: Record<string, string>;
+  elementFeedback: Record<string, string>;
   exporting: boolean;
+  includeMeaningfulRequests: boolean;
+  networkRequests: NetworkRequest[];
+  onIncludeMeaningfulRequestsChange: (value: boolean) => void;
   onFeedbackChange: (id: string, value: string) => void;
   onActionFeedbackChange: (id: string, value: string) => void;
+  onElementFeedbackChange: (id: string, value: string) => void;
   onClose: () => void;
-  onExport: () => void;
+  onExport: (scope: { breakpoints: boolean; events: boolean }) => void;
 };
 
-export function InspectExportModal({ screenshots, feedback, recordings, actionFeedback, exporting, onFeedbackChange, onActionFeedbackChange, onClose, onExport }: InspectExportModalProps) {
+export function InspectExportModal({ screenshots, feedback, recordings, actionFeedback, elementFeedback, exporting, includeMeaningfulRequests, networkRequests, onIncludeMeaningfulRequestsChange, onFeedbackChange, onActionFeedbackChange, onElementFeedbackChange, onClose, onExport }: InspectExportModalProps) {
+  const [includeBreakpoints, setIncludeBreakpoints] = useState(true);
+  const [includeEvents, setIncludeEvents] = useState(false);
+  const eventsAccordionRef = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !exporting) onClose();
@@ -22,9 +31,16 @@ export function InspectExportModal({ screenshots, feedback, recordings, actionFe
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [exporting, onClose]);
 
-  const reviewedCount = screenshots.filter((screenshot) => feedback[screenshot.id]?.trim()).length;
+  const reviewedCount = screenshots.filter((screenshot) => {
+    const elements = screenshot.elements?.length ? screenshot.elements : screenshot.element ? [screenshot.element] : [];
+    return feedback[screenshot.id]?.trim() || elements.some((_element, index) => elementFeedback[elementFeedbackId(screenshot.id, index)]?.trim());
+  }).length;
+  const reviewedElementCount = Object.values(elementFeedback).filter(value => value.trim()).length;
   const reviewedActionCount = recordings.flatMap((recording) => recording.actions).filter((action) => actionFeedback[action.id]?.trim()).length;
-  const canExport = reviewedCount + reviewedActionCount > 0;
+  const totalEventCount = recordings.reduce((total, recording) => total + recording.actions.length, 0);
+  const breakpointFeedbackCount = reviewedCount + reviewedElementCount;
+  const canExport = (includeBreakpoints && breakpointFeedbackCount > 0) || (includeEvents && totalEventCount > 0);
+  const meaningfulCount = meaningfulRequestInsights(networkRequests).size;
 
   return (
     <div id="modal-overlay" role="presentation" onMouseDown={(event) => {
@@ -34,28 +50,57 @@ export function InspectExportModal({ screenshots, feedback, recordings, actionFe
         <div className="modal-heading">
           <div>
             <h2 id="inspect-export-title">Create improvement prompt</h2>
-            <p className="modal-subtitle">Describe the requested change for every screenshot you want included.</p>
+            <p className="modal-subtitle">Choose breakpoint evidence, recorded journeys, replay results, or any combination.</p>
           </div>
           <button className="modal-close" aria-label="Close improvement prompt" onClick={onClose} disabled={exporting}>×</button>
         </div>
-        <div className="prompt-feedback-list">
+        <details className="export-scope-accordion" open>
+          <summary>
+            <label onClick={(event) => event.stopPropagation()}>
+              <input type="checkbox" checked={includeBreakpoints} onChange={(event) => setIncludeBreakpoints(event.target.checked)} disabled={exporting} />
+              <span><strong>Export breakpoints</strong><small>{screenshots.length} captured breakpoint{screenshots.length === 1 ? '' : 's'} available · selected by default</small></span>
+            </label>
+          </summary>
+          <div className={`prompt-feedback-list ${includeBreakpoints ? '' : 'scope-disabled'}`}>
           {screenshots.map((screenshot) => (
-            <label className="prompt-feedback-item" key={screenshot.id}>
+            <div className="prompt-feedback-item" key={screenshot.id}>
               <img src={screenshot.dataUrl} alt="" />
               <span>
-                <strong>{screenshot.width} × {screenshot.height} · {screenshot.element?.selector || 'No element selected'}</strong>
+                <strong>{screenshot.width} × {screenshot.height} · {(screenshot.elements?.length || (screenshot.element ? 1 : 0))} selected element{(screenshot.elements?.length || (screenshot.element ? 1 : 0)) === 1 ? '' : 's'}</strong>
                 <textarea
                   value={feedback[screenshot.id] || ''}
                   onChange={(event) => onFeedbackChange(screenshot.id, event.target.value)}
                   placeholder="Describe the visual or layout change needed..."
+                  disabled={!includeBreakpoints || exporting}
                 />
+                {(screenshot.elements?.length ? screenshot.elements : screenshot.element ? [screenshot.element] : []).map((element, index) => (
+                  <label className="prompt-element-feedback" key={`${element.selector}-${index}`}>
+                    <small><code>{element.selector}</code></small>
+                    <textarea
+                      value={elementFeedback[elementFeedbackId(screenshot.id, index)] || ''}
+                      onChange={(event) => onElementFeedbackChange(elementFeedbackId(screenshot.id, index), event.target.value)}
+                      placeholder="Describe the change for this selected element..."
+                      disabled={!includeBreakpoints || exporting}
+                    />
+                  </label>
+                ))}
               </span>
-            </label>
+            </div>
           ))}
-        </div>
+          </div>
+        </details>
         {recordings.length > 0 && (
-          <details className="prompt-action-feedback">
-            <summary>Recorded event changes ({reviewedActionCount} included)</summary>
+          <details className="prompt-action-feedback export-scope-accordion" ref={eventsAccordionRef}>
+            <summary>
+              <label onClick={(event) => event.stopPropagation()}>
+                <input type="checkbox" checked={includeEvents} onChange={(event) => {
+                  setIncludeEvents(event.target.checked);
+                  if (event.target.checked && eventsAccordionRef.current) eventsAccordionRef.current.open = true;
+                }} disabled={exporting} />
+                <span><strong>Export events and replays</strong><small>Includes all {totalEventCount} events from {recordings.length} recording/replay session{recordings.length === 1 ? '' : 's'} · change notes are optional</small></span>
+              </label>
+            </summary>
+            <div className={includeEvents ? '' : 'scope-disabled'}>
             {recordings.map((recording) => (
               <div className="prompt-recording" key={recording.id}>
                 <h3>{recording.id}</h3>
@@ -65,19 +110,31 @@ export function InspectExportModal({ screenshots, feedback, recordings, actionFe
                     <textarea
                       value={actionFeedback[action.id] || ''}
                       onChange={(event) => onActionFeedbackChange(action.id, event.target.value)}
-                      placeholder="Describe what should change for this event..."
+                      placeholder="Optional: describe what should change for this event..."
+                      disabled={!includeEvents || exporting}
                     />
                   </label>
                 ))}
               </div>
             ))}
+            </div>
           </details>
         )}
-        {!canExport && <p className="field-error">Enter feedback for at least one screenshot or recorded event.</p>}
+        <label className={`meaningful-request-option ${includeEvents ? '' : 'scope-disabled'}`}>
+          <input
+            type="checkbox"
+            checked={includeMeaningfulRequests}
+            onChange={(event) => onIncludeMeaningfulRequestsChange(event.target.checked)}
+            disabled={!includeEvents || !meaningfulCount || exporting}
+          />
+          <span><strong>Include meaningful request analysis</strong><small>{meaningfulCount ? `${meaningfulCount} slow, failed, or repeated equivalent request${meaningfulCount === 1 ? '' : 's'} will be included.` : 'No slow, failed, or repeated equivalent requests were found.'}</small></span>
+        </label>
+        {!includeBreakpoints && !includeEvents && <p className="field-error">Select at least one export section.</p>}
+        {(includeBreakpoints || includeEvents) && !canExport && <p className="field-error">The selected sections do not contain exportable breakpoint feedback or journey events.</p>}
         <div className="modal-actions">
-          <span className="review-count">{reviewedCount} screenshot{reviewedCount === 1 ? '' : 's'}, {reviewedActionCount} event{reviewedActionCount === 1 ? '' : 's'} included</span>
+          <span className="review-count">{includeBreakpoints ? reviewedCount : 0} screenshot{reviewedCount === 1 ? '' : 's'}, {includeBreakpoints ? reviewedElementCount : 0} element note{reviewedElementCount === 1 ? '' : 's'}, {includeEvents ? totalEventCount : 0} event{totalEventCount === 1 ? '' : 's'} · {includeEvents ? reviewedActionCount : 0} change note{reviewedActionCount === 1 ? '' : 's'}</span>
           <button className="btn btn-ghost" onClick={onClose} disabled={exporting}>Cancel</button>
-          <button className="btn btn-primary" onClick={onExport} disabled={!canExport || exporting}>{exporting ? 'Preparing...' : 'Export prompt'}</button>
+          <button className="btn btn-primary" onClick={() => onExport({ breakpoints: includeBreakpoints, events: includeEvents })} disabled={!canExport || exporting}>{exporting ? 'Preparing...' : 'Export prompt'}</button>
         </div>
       </div>
     </div>

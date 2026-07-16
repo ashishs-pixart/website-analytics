@@ -15,6 +15,10 @@
     <main>
       <section>
         <div class="section-heading"><div><h1>User journey</h1><p>Record website actions, then replay them while Network Watch captures requests.</p></div><span id="action-count" class="count">0</span></div>
+        <label class="recording-control">
+          <span>Recording to replay</span>
+          <select id="replay-recording" aria-label="Recording to replay"></select>
+        </label>
         <div class="button-row">
           <button id="record" class="primary">Record</button>
           <button id="replay">Replay</button>
@@ -22,8 +26,9 @@
       </section>
 
       <section>
-        <div class="section-heading"><div><h1>Responsive simulation</h1><p>Render five fitted desktop breakpoints, refreshing at each size.</p></div></div>
+        <div class="section-heading"><div><h1>Responsive simulation</h1><p>11 fitted desktop, tablet, and mobile sizes · 6 seconds each.</p></div></div>
         <div class="resolution"><span>Current resolution</span><strong id="resolution">Not simulating</strong></div>
+        <label id="breakpoint-control" class="breakpoint-control" hidden><span>Choose paused breakpoint</span><input id="breakpoint-slider" type="range" min="0" max="10" step="1" value="0"><strong id="breakpoint-slider-label"></strong></label>
         <div class="button-row three">
           <button id="simulate" class="primary">Simulate</button>
           <button id="pause" disabled>Pause</button>
@@ -32,13 +37,16 @@
       </section>
 
       <section>
-        <div class="section-heading"><div><h1>Inspect snapshot</h1><p>Pause first, select an element, then capture the full page.</p></div></div>
-        <div id="selected-element" class="selection">No element selected</div>
+        <div class="section-heading"><div><h1>Inspect snapshot</h1><p>Select elements at any time. Screenshot capture is available during simulation.</p></div></div>
+        <div id="selected-element" class="selection">No elements selected</div>
+        <div id="capture-count" class="selection">0 breakpoint captures added</div>
         <div class="button-row">
-          <button id="select-element" disabled>Select element</button>
-          <button id="screenshot" class="primary" disabled>Screenshot</button>
+          <button id="select-element">Select elements</button>
+          <button id="screenshot" class="primary" disabled>Add breakpoint capture</button>
         </div>
       </section>
+
+      <button id="reset" class="reset-button">Reset extension and website</button>
 
       <div id="message" role="status"></div>
     </main>

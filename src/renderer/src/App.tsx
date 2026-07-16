@@ -15,7 +15,7 @@ import type { ExtensionState, NetworkRequest, Target, ToastState } from './types
 import { captureReducer } from './utils/capture';
 import { formatBytes } from './utils/format';
 import { makePostmanCollection, makeSelectedFieldsExport, type ExportField } from './utils/export';
-import { makeInspectPrompt } from './utils/inspectExport';
+import { elementFeedbackId, makeInspectPrompt } from './utils/inspectExport';
 
 const EMPTY_EXTENSION_STATE: ExtensionState = {
   screenshots: [],
@@ -47,10 +47,12 @@ export function App() {
   const [detailWidth, setDetailWidth] = useState('43%');
   const [showExport, setShowExport] = useState(false);
   const [showInspectExport, setShowInspectExport] = useState(false);
+  const [includeMeaningfulRequests, setIncludeMeaningfulRequests] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [extensionState, setExtensionState] = useState<ExtensionState>(EMPTY_EXTENSION_STATE);
   const [screenshotFeedback, setScreenshotFeedback] = useState<Record<string, string>>({});
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
+  const [elementFeedback, setElementFeedback] = useState<Record<string, string>>({});
   const exportRef = useRef(() => {});
 
   const showToast = useCallback((message: string) => {
@@ -160,6 +162,7 @@ export function App() {
       setExtensionState(result.state);
       setScreenshotFeedback({});
       setActionFeedback({});
+      setElementFeedback({});
       showToast('Extension data cleared');
     }
   }, [showToast]);
@@ -170,6 +173,10 @@ export function App() {
 
   const changeActionFeedback = useCallback((id: string, value: string) => {
     setActionFeedback((current) => ({ ...current, [id]: value }));
+  }, []);
+
+  const changeElementFeedback = useCallback((id: string, value: string) => {
+    setElementFeedback((current) => ({ ...current, [id]: value }));
   }, []);
 
   const exportRequests = useCallback(async (format: ExportFormat, fields: Set<ExportField>) => {
@@ -189,10 +196,10 @@ export function App() {
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const isPostman = format === 'postman';
-      const data = isPostman ? makePostmanCollection(exportableRequests) : makeSelectedFieldsExport(exportableRequests, fields);
+      const data = isPostman ? JSON.stringify(makePostmanCollection(exportableRequests), null, 2) : makeSelectedFieldsExport(exportableRequests, fields);
       const result = await window.cdp.saveFile({
-        defaultPath: isPostman ? `network-postman-${timestamp}.json` : `network-export-${timestamp}.json`,
-        content: JSON.stringify(data, null, 2),
+        defaultPath: isPostman ? `network-postman-${timestamp}.json` : `network-export-${timestamp}.md`,
+        content: data,
       });
       if (result.ok) {
         setShowExport(false);
@@ -205,15 +212,18 @@ export function App() {
     }
   }, [filteredRequests, showToast]);
 
-  const exportInspectPrompt = useCallback(async () => {
-    const reviewed = extensionState.screenshots.filter((screenshot) => screenshotFeedback[screenshot.id]?.trim());
-    const reviewedActionCount = Object.values(actionFeedback).filter((value) => value.trim()).length;
-    if (!reviewed.length && !reviewedActionCount) return;
+  const exportInspectPrompt = useCallback(async (scope: { breakpoints: boolean; events: boolean }) => {
+    const reviewed = scope.breakpoints ? extensionState.screenshots.filter((screenshot) => {
+      const elements = screenshot.elements?.length ? screenshot.elements : screenshot.element ? [screenshot.element] : [];
+      return screenshotFeedback[screenshot.id]?.trim() || elements.some((_element, index) => elementFeedback[elementFeedbackId(screenshot.id, index)]?.trim());
+    }) : [];
+    const eventCount = scope.events ? extensionState.recordings.reduce((total, recording) => total + recording.actions.length, 0) : 0;
+    if (!reviewed.length && !eventCount) return;
     setExporting(true);
     try {
       const result = await window.cdp.saveFile({
         defaultPath: `website-improvements-${new Date().toISOString().replace(/[:.]/g, '-')}.md`,
-        content: makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests),
+        content: makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests, includeMeaningfulRequests, elementFeedback, scope),
       });
       if (result.ok) {
         setShowInspectExport(false);
@@ -224,7 +234,7 @@ export function App() {
     } finally {
       setExporting(false);
     }
-  }, [actionFeedback, allRequests, extensionState.recordings, extensionState.screenshots, screenshotFeedback, showToast]);
+  }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, screenshotFeedback, showToast]);
 
   const openModeExport = useCallback(() => {
     if (mode === 'inspect') setShowInspectExport(true);
@@ -268,19 +278,22 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [loadExtensionData]);
 
-  const startResize = useCallback(() => {
-    const onMove = (event: MouseEvent) => {
+  const startResize = useCallback((handle: HTMLDivElement, pointerId: number) => {
+    handle.setPointerCapture(pointerId);
+    const onMove = (event: PointerEvent) => {
       const width = window.innerWidth - event.clientX;
       setDetailWidth(`${Math.max(340, Math.min(window.innerWidth * 0.7, width))}px`);
     };
     const onUp = () => {
       document.body.style.cursor = '';
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
     };
     document.body.style.cursor = 'col-resize';
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   }, []);
 
   return (
@@ -323,7 +336,7 @@ export function App() {
           />
           <main id="split-pane">
             <RequestTable requests={filteredRequests} totalCount={order.length} selectedId={selectedId} onSelect={setSelectedId} />
-            <div id="resize-handle" onMouseDown={startResize} />
+            <div id="resize-handle" role="separator" aria-label="Resize request details" aria-orientation="vertical" onPointerDown={(event) => startResize(event.currentTarget, event.pointerId)} />
             <div id="detail-panel" style={{ width: detailWidth }}>
               <RequestDetails request={selectedRequest} activeTab={activeTab} setActiveTab={setActiveTab} onLoadBody={loadResponseBody} />
             </div>
@@ -335,9 +348,11 @@ export function App() {
           state={extensionState}
           feedback={screenshotFeedback}
           actionFeedback={actionFeedback}
+          elementFeedback={elementFeedback}
           networkRequests={allRequests}
           onFeedbackChange={changeFeedback}
           onActionFeedbackChange={changeActionFeedback}
+          onElementFeedbackChange={changeElementFeedback}
           onRefresh={loadExtensionData}
           onClear={clearExtensionData}
         />
@@ -358,9 +373,14 @@ export function App() {
           feedback={screenshotFeedback}
           recordings={extensionState.recordings}
           actionFeedback={actionFeedback}
+          elementFeedback={elementFeedback}
           exporting={exporting}
+          includeMeaningfulRequests={includeMeaningfulRequests}
+          onIncludeMeaningfulRequestsChange={setIncludeMeaningfulRequests}
+          networkRequests={allRequests}
           onFeedbackChange={changeFeedback}
           onActionFeedbackChange={changeActionFeedback}
+          onElementFeedbackChange={changeElementFeedback}
           onClose={() => setShowInspectExport(false)}
           onExport={exportInspectPrompt}
         />
