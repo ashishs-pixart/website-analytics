@@ -211,8 +211,8 @@ The local MCP server exposes:
 
 - `list_recordings`: total count, `REC-*` IDs, and ordered `ACT-*` descriptions.
 - `get_recording`: complete recording and baseline request evidence.
-- `replay_recording`: replays a recording in the active Chrome tab and compares action order and requests.
-- `get_replay_result`: retrieves a queued or completed `REPLAY-*` result.
+- `replay_recording`: replays a recording in the active Chrome tab and returns a deterministic per-action report listing success, every request, response equality, and replay timing (faster/slower/same).
+- `get_replay_result`: retrieves a queued or completed `REPLAY-*` result in the same report format.
 - `export_recording_analysis`: returns the recording/replay export directly as Markdown or JSON model context.
 - `export_network_capture`: returns the current captured request export directly as Markdown or JSON.
 
@@ -224,7 +224,7 @@ See [`docs/deployment-and-architecture.md`](docs/deployment-and-architecture.md)
 
 ## Notes
 
-- Response bodies are loaded on demand. Some bodies may not be available after cache/service-worker redirects or if the browser has discarded them.
+- Response bodies are loaded on demand for the UI. For replay comparison, Network Watch stores only a private SHA-256 body hash, not the body itself; the hash is excluded from MCP results and all exports. When Chrome cannot provide a body, equality falls back to HTTP status and network error information.
 - The extension bridge listens only on `127.0.0.1`. Recordings and replay results are persisted in Network Watch's Electron user-data directory; screenshots remain session data.
 - Chrome extensions cannot force-open the native DevTools Elements panel. The extension provides an in-page element picker and captures equivalent selector, HTML, stylesheet-rule, and computed-style metadata.
 - For security, expose remote debugging only on trusted local machines.

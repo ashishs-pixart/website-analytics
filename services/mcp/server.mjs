@@ -16,6 +16,60 @@ function errorResult(error) {
   };
 }
 
+function duration(value) {
+  return value == null ? 'unknown' : `${Math.round(value)} ms`;
+}
+
+function timingMessage(request) {
+  let classification = request.timingComparison;
+  if (!classification) {
+    if (request.baselineDurationMs == null || request.replayDurationMs == null) classification = 'unknown';
+    else if (request.replayDurationMs < request.baselineDurationMs) classification = 'faster';
+    else if (request.replayDurationMs > request.baselineDurationMs) classification = 'slower';
+    else classification = 'same';
+  }
+  if (classification === 'unknown') return 'Timing unavailable.';
+  if (classification === 'same') return `Replay took the same time (${duration(request.replayDurationMs)}).`;
+  const deltaMs = request.deltaMs ?? request.replayDurationMs - request.baselineDurationMs;
+  return `Replay took ${duration(Math.abs(deltaMs))} ${classification} (${duration(request.replayDurationMs)} vs ${duration(request.baselineDurationMs)} recorded).`;
+}
+
+export function formatReplayReport(job) {
+  const comparison = job.comparison || {};
+  const lines = [
+    `Replay ${job.status}: ${job.runId}`,
+    `Recording: ${job.recordingId}`,
+  ];
+  if (!comparison.events?.length) {
+    if (job.error) lines.push(`Error: ${job.error}`);
+    else lines.push('No completed action report is available yet.');
+    return lines.join('\n');
+  }
+
+  for (const event of comparison.events) {
+    const actionSucceeded = event.success ?? event.replayStatus === 'succeeded';
+    lines.push('', `Action ${event.sequence} - Success: ${actionSucceeded}`, event.description);
+    if (event.replayError) lines.push(`Error: ${event.replayError}`);
+    const matched = event.requests?.matched || [];
+    const missing = event.requests?.missing || [];
+    const unexpected = event.requests?.unexpected || [];
+    if (!matched.length && !missing.length && !unexpected.length) lines.push('Requests: none');
+    matched.forEach((request, index) => {
+      const responseSame = request.responseSame ?? request.baselineStatus === request.replayStatus;
+      lines.push(
+        `Request ${index + 1}: ${request.method || request.fingerprint} ${request.url || ''}`.trim(),
+        ...(request.hierarchyMessage ? [`Hierarchy: ${request.hierarchyMessage}`] : []),
+        `Response: ${request.responseMessage || (responseSame ? 'Same response received.' : 'A different response was received.')} (${request.baselineStatus ?? 'unknown'} recorded, ${request.replayStatus ?? 'unknown'} replay; compared by ${request.responseComparisonBasis || 'status'}).`,
+        `Time: ${timingMessage(request)}`,
+      );
+    });
+    missing.forEach((request, index) => lines.push(`Missing request ${index + 1}: ${request.method || ''} ${request.url || request.fingerprint}`.trim()));
+    unexpected.forEach((request, index) => lines.push(`Unexpected request ${index + 1}: ${request.method || ''} ${request.url || request.fingerprint}`.trim()));
+  }
+  lines.push('', comparison.summary?.message || 'Replay comparison completed.');
+  return lines.join('\n');
+}
+
 export function createNetworkWatchMcpServer(options = {}) {
   const client = new NetworkWatchClient(options.baseUrl);
   const server = new McpServer({ name: 'network-watch', version: '1.0.0' });
@@ -59,7 +113,7 @@ export function createNetworkWatchMcpServer(options = {}) {
 
   server.registerTool('replay_recording', {
     title: 'Replay and compare a Network Watch recording',
-    description: 'Replay a saved REC-* browser journey in the active Chrome tab. Returns whether all actions succeeded in the original sequence and whether the replay produced the same normalized requests, including matched, missing, unexpected, reordered, and status-changed counts.',
+    description: 'Replay a saved REC-* browser journey in the active Chrome tab. Requests are matched across the whole journey by normalized identity and occurrence number, regardless of action window; for example, the second occurrence in the recording is compared with the second occurrence in the replay. Returns deterministic response equality and timing for every match, plus missing, unexpected, status-changed, and response-changed counts.',
     inputSchema: {
       recordingId: z.string().startsWith('REC-'),
       timeoutMs: z.number().int().min(1000).max(600000).default(120000),
@@ -79,7 +133,7 @@ export function createNetworkWatchMcpServer(options = {}) {
     try {
       const job = await client.replayRecording(input);
       const comparison = job.comparison || {};
-      return result({
+      const structured = {
         runId: job.runId,
         recordingId: job.recordingId,
         status: job.status,
@@ -87,7 +141,8 @@ export function createNetworkWatchMcpServer(options = {}) {
         events: comparison.events || [],
         firstMismatch: comparison.firstMismatch || null,
         error: job.error || null,
-      });
+      };
+      return result(structured, formatReplayReport(job));
     } catch (error) {
       return errorResult(error);
     }
@@ -102,7 +157,7 @@ export function createNetworkWatchMcpServer(options = {}) {
   }, async ({ runId }) => {
     try {
       const response = await client.getReplayResult(runId);
-      return result({ job: response.job });
+      return result({ job: response.job }, formatReplayReport(response.job));
     } catch (error) {
       return errorResult(error);
     }

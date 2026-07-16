@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ExtensionRecording, ExtensionScreenshot, NetworkRequest } from '../types';
-import { elementFeedbackId, meaningfulRequestInsights } from '../utils/inspectExport';
+import { elementFeedbackId, isFetchRequest, meaningfulRequestInsights } from '../utils/inspectExport';
 
 type InspectExportModalProps = {
   screenshots: ExtensionScreenshot[];
@@ -10,8 +10,10 @@ type InspectExportModalProps = {
   elementFeedback: Record<string, string>;
   exporting: boolean;
   includeMeaningfulRequests: boolean;
+  fetchOnly: boolean;
   networkRequests: NetworkRequest[];
   onIncludeMeaningfulRequestsChange: (value: boolean) => void;
+  onFetchOnlyChange: (value: boolean) => void;
   onFeedbackChange: (id: string, value: string) => void;
   onActionFeedbackChange: (id: string, value: string) => void;
   onElementFeedbackChange: (id: string, value: string) => void;
@@ -20,7 +22,7 @@ type InspectExportModalProps = {
   submitLabel?: string;
 };
 
-export function InspectExportModal({ screenshots, feedback, recordings, actionFeedback, elementFeedback, exporting, includeMeaningfulRequests, networkRequests, onIncludeMeaningfulRequestsChange, onFeedbackChange, onActionFeedbackChange, onElementFeedbackChange, onClose, onExport, submitLabel = 'Export prompt' }: InspectExportModalProps) {
+export function InspectExportModal({ screenshots, feedback, recordings, actionFeedback, elementFeedback, exporting, includeMeaningfulRequests, fetchOnly, networkRequests, onIncludeMeaningfulRequestsChange, onFetchOnlyChange, onFeedbackChange, onActionFeedbackChange, onElementFeedbackChange, onClose, onExport, submitLabel = 'Export prompt' }: InspectExportModalProps) {
   const [includeBreakpoints, setIncludeBreakpoints] = useState(true);
   const [includeEvents, setIncludeEvents] = useState(false);
   const eventsAccordionRef = useRef<HTMLDetailsElement>(null);
@@ -41,7 +43,8 @@ export function InspectExportModal({ screenshots, feedback, recordings, actionFe
   const totalEventCount = recordings.reduce((total, recording) => total + recording.actions.length, 0);
   const breakpointFeedbackCount = reviewedCount + reviewedElementCount;
   const canExport = (includeBreakpoints && breakpointFeedbackCount > 0) || (includeEvents && totalEventCount > 0);
-  const meaningfulCount = meaningfulRequestInsights(networkRequests).size;
+  const fetchCount = networkRequests.filter(isFetchRequest).length;
+  const meaningfulCount = meaningfulRequestInsights(fetchOnly ? networkRequests.filter(isFetchRequest) : networkRequests).size;
 
   return (
     <div id="modal-overlay" role="presentation" onMouseDown={(event) => {
@@ -129,6 +132,15 @@ export function InspectExportModal({ screenshots, feedback, recordings, actionFe
             disabled={!includeEvents || !meaningfulCount || exporting}
           />
           <span><strong>Include meaningful request analysis</strong><small>{meaningfulCount ? `${meaningfulCount} slow, failed, or repeated equivalent request${meaningfulCount === 1 ? '' : 's'} will be included.` : 'No slow, failed, or repeated equivalent requests were found.'}</small></span>
+        </label>
+        <label className={`meaningful-request-option ${includeEvents && includeMeaningfulRequests ? '' : 'scope-disabled'}`}>
+          <input
+            type="checkbox"
+            checked={fetchOnly}
+            onChange={(event) => onFetchOnlyChange(event.target.checked)}
+            disabled={!includeEvents || !includeMeaningfulRequests || exporting}
+          />
+          <span><strong>Only Fetch requests</strong><small>Exclude XHR, CSS, JavaScript, documents, images, fonts, and other resources. {fetchCount} request{fetchCount === 1 ? '' : 's'} match.</small></span>
         </label>
         {!includeBreakpoints && !includeEvents && <p className="field-error">Select at least one export section.</p>}
         {(includeBreakpoints || includeEvents) && !canExport && <p className="field-error">The selected sections do not contain exportable breakpoint feedback or journey events.</p>}

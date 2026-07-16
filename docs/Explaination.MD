@@ -86,13 +86,13 @@ The content script registers capturing-phase DOM listeners. Capturing phase lets
 
 | User behavior | Browser API/event used | Recorded behavior |
 | --- | --- | --- |
-| Click | `document.addEventListener('click', ..., true)` | Records the nearest actionable target, selector/locator, text, link, coordinates, viewport, URL, and time since the prior action. |
+| Click | `document.addEventListener('click', ..., true)` | Records the composed-path actionable target, semantic fingerprint, surrounding context, hierarchy/shadow/XPath fallbacks, coordinates, viewport, URL, and time since the prior action. |
 | Text entry | `input` plus `blur` events | Debounces input for 650 ms and records the final value. Password fields are excluded. |
 | Select, checkbox, radio, date, range, color | `change` event | Records final value and checked state where applicable. |
 | Enter and other non-text keys | `keydown` and `submit` events | Records key/code/modifiers. A submit fallback prevents an Enter submission from being missed. |
 | Scroll | `window.addEventListener('scroll', ..., true)` | Debounces for 180 ms and records scroll coordinates. |
 
-Each captured action receives `ACT-<UUID>`. The action includes a generated CSS selector and a locator bundle: tag name, id, test IDs, name, role, aria label, href, and short visible text. The selector prefers an element id, then stable test/name attributes, then a bounded structural selector. The content script sends the action to the background worker with `chrome.runtime.sendMessage({ type: 'RECORDED_ACTION', action })`.
+Each captured action receives `ACT-<UUID>`. Its locator bundle includes role/accessibility data, test and stable IDs, labels, placeholder, text, sibling/parent context, visible-role index, nearest heading/landmark/form, visual fingerprint, DOM and open-shadow paths, XPath, frame context, and coordinates. The content script sends the action to the background worker with `chrome.runtime.sendMessage({ type: 'RECORDED_ACTION', action })`.
 
 ### 5.3 Saving a recording
 
@@ -122,7 +122,8 @@ Each saved request is a redacted snapshot. Sensitive URL query parameters, autho
 
 ### 6.2 How actions are replayed
 
-- Clicks: the extension first resolves the target using recorded selector, test/id/name/role/label/text, and coordinates. For main-frame clicks it tries the Chrome Debugger API (`chrome.debugger.attach` plus CDP `Input.dispatchMouseEvent`) to produce trusted browser mouse input. If that cannot be used, it asks the content script to perform the DOM fallback.
+- Target resolution: the extension prioritizes unique Playwright-style semantic matches, then scores visible candidates using accessibility, labels, text, sibling/parent context, headings, landmarks, forms, class/ancestor overlap, visible-role position, and visual fingerprint. DOM hierarchy, open-shadow hierarchy, XPath, active focus, and coordinates are later fallbacks. Frame URLs are used to rediscover iframe IDs after reloads.
+- Clicks: for main-frame clicks it uses the Chrome Debugger API (`chrome.debugger.attach` plus CDP `Input.dispatchMouseEvent`) to produce trusted browser mouse input. If that cannot be used, it asks the content script to perform the DOM fallback.
 - Input/change: the content script resolves the target, sets the saved value or checked state, then dispatches the relevant DOM events.
 - Keypress: the content script creates and dispatches the saved keyboard event.
 - Scroll: the content script scrolls to the saved coordinates.
@@ -398,8 +399,8 @@ await sendToTab(tab.id, { type: 'SET_RECORDING', recording: true }); // Tell the
 const action = {
   id: `ACT-${crypto.randomUUID()}`, // Give this event a stable identity that replay can reference.
   type, // Preserve the semantic action kind used by replay.
-  selector: uniqueSelector(element), // Record the best current CSS target.
-  locator: elementLocator(element), // Retain fallback attributes and text for resilient resolution.
+  selector: locator.selector, // Retain a readable structural description for diagnostics.
+  locator, // Store semantic, contextual, structural, shadow, frame, visual, and coordinate evidence.
   delayMs: now - lastActionAt, // Preserve user pacing within bounded replay delays.
 };
 ```

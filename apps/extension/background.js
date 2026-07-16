@@ -3,7 +3,7 @@ const MAX_ACTIONS = 500;
 const MAX_RECORDINGS = 10;
 const MCP_REPLAY_ALARM = 'network-watch-mcp-replay';
 const BREAKPOINT_DWELL_MS = 6000;
-const BREAKPOINTS = [
+const STANDARD_BREAKPOINTS = [
   { width: 1920, height: 1080, label: 'Desktop 1080p' },
   { width: 1760, height: 990, label: 'Desktop midpoint A' },
   { width: 1600, height: 900, label: 'Desktop 900p' },
@@ -35,6 +35,7 @@ const DEFAULT_STATE = {
     width: null,
     height: null,
     currentIndex: null,
+    breakpoints: [],
   },
   selectedElements: [],
   selectingElements: false,
@@ -74,7 +75,9 @@ function publicState(bridgeConnected = false) {
     recordings: availableRecordings(),
     bridgeConnected,
     actionCount: runtimeState.actions.length,
-    breakpoints: BREAKPOINTS,
+    breakpoints: runtimeState.simulation.breakpoints?.length
+      ? runtimeState.simulation.breakpoints
+      : STANDARD_BREAKPOINTS,
   };
 }
 
@@ -324,6 +327,34 @@ function replayActionLabel(action) {
   return `${action.type} · ${String(target).slice(0, 140)}`;
 }
 
+async function currentReplayFrameId(tabId, action) {
+  if (!action.frameId) return 0;
+  try {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId });
+    const matching = frames.filter(frame => frame.url === action.frameUrl);
+    if (matching.length === 1) return matching[0].frameId;
+    const recordedChain = action.locator?.frameChain?.map(frame => frame.url).filter(Boolean) || [];
+    if (recordedChain.length > 1) {
+      const byId = new Map(frames.map(frame => [frame.frameId, frame]));
+      const chainFor = frame => {
+        const urls = [];
+        let current = frame;
+        while (current) {
+          urls.unshift(current.url);
+          current = current.parentFrameId >= 0 ? byId.get(current.parentFrameId) : null;
+        }
+        return urls;
+      };
+      const chainMatch = matching.find(frame => JSON.stringify(chainFor(frame)) === JSON.stringify(recordedChain));
+      if (chainMatch) return chainMatch.frameId;
+    }
+    const original = matching.find(frame => frame.frameId === action.frameId);
+    return original?.frameId ?? matching[0]?.frameId ?? action.frameId;
+  } catch {
+    return action.frameId;
+  }
+}
+
 async function sendReplayProgress(tabId, replayRecording, entries, phase, successfulActions, failedActions, currentIndex = null, message = '') {
   try {
     await sendToTab(tabId, {
@@ -407,29 +438,30 @@ async function replayActions(recordingId, suppliedRecording = null, requestedRun
           await sendReplayProgress(tab.id, replayRecording, progressEntries, 'running', successfulActions, failedActions, index, `Restored the recorded page for action ${index + 1}`);
         }
         const urlBeforeAction = await currentTabUrl(tab.id);
+        const replayFrameId = await currentReplayFrameId(tab.id, replayAction);
         let result;
         if (replayAction.type === 'click') {
           try {
-            const target = await dispatchTrustedClick(tab.id, replayAction, action.frameId || 0, replayDebugger);
+            const target = await dispatchTrustedClick(tab.id, replayAction, replayFrameId, replayDebugger);
             result = { ok: true, resolutionMethod: target.resolutionMethod };
             replayAction.executionMethod = 'cdp-trusted-click';
           } catch (trustedClickError) {
-            result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: action.frameId || 0 });
+            result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: replayFrameId });
             replayAction.executionMethod = 'dom-click-fallback';
             replayAction.executionWarning = `Trusted click unavailable: ${trustedClickError.message}`;
           }
         } else if (replayAction.type === 'keypress') {
           try {
-            const target = await dispatchTrustedKeypress(tab.id, replayAction, action.frameId || 0, replayDebugger);
+            const target = await dispatchTrustedKeypress(tab.id, replayAction, replayFrameId, replayDebugger);
             result = { ok: true, resolutionMethod: target.resolutionMethod };
             replayAction.executionMethod = 'cdp-trusted-key';
           } catch (trustedKeyError) {
-            result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: action.frameId || 0 });
+            result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: replayFrameId });
             replayAction.executionMethod = 'dom-key-event-fallback';
             replayAction.executionWarning = `Trusted key dispatch unavailable: ${trustedKeyError.message}`;
           }
         } else {
-          result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: action.frameId || 0 });
+          result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: replayFrameId });
           replayAction.executionMethod = replayAction.type === 'scroll' ? 'scroll' : replayAction.type === 'input' || replayAction.type === 'change' ? 'input-value' : 'dom-key-event';
         }
         if (!result?.ok) throw new Error(result?.error || `Could not replay action ${index + 1}.`);
@@ -545,6 +577,29 @@ async function applyMetrics(tabId, width, height) {
   await persistState();
 }
 
+async function currentViewportBreakpoint(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  try {
+    const metrics = await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Page.getLayoutMetrics');
+    const viewport = metrics.cssVisualViewport || metrics.visualViewport;
+    const width = Math.round(viewport?.clientWidth || tab.width || STANDARD_BREAKPOINTS[0].width);
+    const height = Math.round(viewport?.clientHeight || tab.height || STANDARD_BREAKPOINTS[0].height);
+    return { width: Math.max(1, width), height: Math.max(1, height), label: 'Current screen' };
+  } catch {
+    return {
+      width: Math.max(1, tab.width || STANDARD_BREAKPOINTS[0].width),
+      height: Math.max(1, tab.height || STANDARD_BREAKPOINTS[0].height),
+      label: 'Current screen',
+    };
+  }
+}
+
+function simulationBreakpoints() {
+  return runtimeState.simulation.breakpoints?.length
+    ? runtimeState.simulation.breakpoints
+    : STANDARD_BREAKPOINTS;
+}
+
 async function runSimulation(runId) {
   while (runtimeState.simulation.active && runId === simulationRunId) {
     if (runtimeState.simulation.paused) {
@@ -552,7 +607,8 @@ async function runSimulation(runId) {
       continue;
     }
 
-    const target = BREAKPOINTS[runtimeState.simulation.presetIndex];
+    const breakpoints = simulationBreakpoints();
+    const target = breakpoints[runtimeState.simulation.presetIndex];
     await applyMetrics(runtimeState.simulation.tabId, target.width, target.height);
     const tabReady = waitForTabComplete(runtimeState.simulation.tabId, 8000);
     await chrome.tabs.reload(runtimeState.simulation.tabId);
@@ -570,7 +626,7 @@ async function runSimulation(runId) {
 
     runtimeState.simulation.currentIndex = runtimeState.simulation.presetIndex;
     runtimeState.simulation.presetIndex += 1;
-    if (runtimeState.simulation.presetIndex >= BREAKPOINTS.length) {
+    if (runtimeState.simulation.presetIndex >= breakpoints.length) {
       runtimeState.simulation.presetIndex = 0;
       runtimeState.simulation.paused = true;
     }
@@ -583,6 +639,7 @@ async function startSimulation() {
   if (runtimeState.simulation.active) return publicState(await bridgeConnected());
   const tab = await activeTab();
   await chrome.debugger.attach(debuggerTarget(tab.id), '1.3');
+  const currentScreen = await currentViewportBreakpoint(tab.id);
   runtimeState.simulation = {
     active: true,
     paused: false,
@@ -591,6 +648,7 @@ async function startSimulation() {
     width: null,
     height: null,
     scale: 1,
+    breakpoints: [currentScreen, ...STANDARD_BREAKPOINTS],
   };
   runtimeState.lastError = '';
   simulationRunId += 1;
@@ -610,8 +668,9 @@ async function pauseSimulation(paused) {
 
 async function setBreakpoint(index) {
   if (!runtimeState.simulation.active || !runtimeState.simulation.paused) throw new Error('Pause the simulation before choosing a breakpoint.');
-  const targetIndex = Math.max(0, Math.min(BREAKPOINTS.length - 1, Number(index)));
-  const target = BREAKPOINTS[targetIndex];
+  const breakpoints = simulationBreakpoints();
+  const targetIndex = Math.max(0, Math.min(breakpoints.length - 1, Number(index)));
+  const target = breakpoints[targetIndex];
   await applyMetrics(runtimeState.simulation.tabId, target.width, target.height);
   const tabReady = waitForTabComplete(runtimeState.simulation.tabId, 8000);
   await chrome.tabs.reload(runtimeState.simulation.tabId);
@@ -623,7 +682,7 @@ async function setBreakpoint(index) {
     await sendToTab(runtimeState.simulation.tabId, { type: 'START_PICKER' });
   }
   runtimeState.simulation.currentIndex = targetIndex;
-  runtimeState.simulation.presetIndex = (targetIndex + 1) % BREAKPOINTS.length;
+  runtimeState.simulation.presetIndex = (targetIndex + 1) % breakpoints.length;
   await persistState();
   return publicState(await bridgeConnected());
 }
@@ -692,13 +751,23 @@ async function resetExtension() {
 }
 
 async function captureScreenshot() {
-  if (!runtimeState.simulation.active) throw new Error('Start the simulation before taking a screenshot.');
-  const tab = await chrome.tabs.get(runtimeState.simulation.tabId);
-  const currentBreakpoint = BREAKPOINTS.find((breakpoint) => breakpoint.width === runtimeState.simulation.width && breakpoint.height === runtimeState.simulation.height);
+  if (!runtimeState.selectedElements.length) throw new Error('Select at least one element before taking a screenshot.');
+  const simulating = runtimeState.simulation.active;
+  const tabId = simulating ? runtimeState.simulation.tabId : runtimeState.selectionTabId;
+  if (!tabId) throw new Error('The selected page is no longer available. Select an element again.');
+  const tab = await chrome.tabs.get(tabId);
+  const currentBreakpoint = simulationBreakpoints().find((breakpoint) => breakpoint.width === runtimeState.simulation.width && breakpoint.height === runtimeState.simulation.height);
+  let attachedForCapture = false;
+  if (!simulating) {
+    await chrome.debugger.attach(debuggerTarget(tab.id), '1.3');
+    attachedForCapture = true;
+  }
   if (runtimeState.selectingElements && runtimeState.selectionTabId === tab.id) {
     try { await sendToTab(tab.id, { type: 'STOP_PICKER' }); } catch { /* Capture without picker cleanup if the page is unavailable. */ }
   }
-  try { await sendToTab(tab.id, { type: 'SET_SIMULATION_FRAME', visible: false }, { frameId: 0 }); } catch { /* Capture without hiding the frame if the page is unavailable. */ }
+  if (simulating) {
+    try { await sendToTab(tab.id, { type: 'SET_SIMULATION_FRAME', visible: false }, { frameId: 0 }); } catch { /* Capture without hiding the frame if the page is unavailable. */ }
+  }
   try {
     let selectedElements = runtimeState.selectedElements;
     try {
@@ -710,8 +779,8 @@ async function captureScreenshot() {
     } catch { /* Keep the selection-time metadata if an element no longer resolves. */ }
     const metrics = await chrome.debugger.sendCommand(debuggerTarget(tab.id), 'Page.getLayoutMetrics');
     const viewport = metrics.cssVisualViewport || metrics.visualViewport || {
-      clientWidth: runtimeState.simulation.width,
-      clientHeight: runtimeState.simulation.height,
+      clientWidth: tab.width,
+      clientHeight: tab.height,
     };
     const capture = await chrome.debugger.sendCommand(debuggerTarget(tab.id), 'Page.captureScreenshot', {
       format: 'jpeg',
@@ -726,8 +795,8 @@ async function captureScreenshot() {
       dataUrl,
       mimeType,
       byteSize: Math.floor(capture.data.length * 0.75),
-      width: runtimeState.simulation.width,
-      height: runtimeState.simulation.height,
+      width: Math.round(viewport.clientWidth || (simulating ? runtimeState.simulation.width : tab.width)),
+      height: Math.round(viewport.clientHeight || (simulating ? runtimeState.simulation.height : tab.height)),
       url: tab.url || '',
       title: tab.title || '',
       capturedAt: new Date().toISOString(),
@@ -742,18 +811,22 @@ async function captureScreenshot() {
     await persistState();
     return { ok: true, screenshot, state: publicState(true) };
   } finally {
-    try {
-      await sendToTab(tab.id, {
-        type: 'SET_SIMULATION_FRAME',
-        visible: true,
-        width: runtimeState.simulation.width,
-        height: runtimeState.simulation.height,
-        label: currentBreakpoint?.label || 'Responsive preview',
-      }, { frameId: 0 });
-      if (runtimeState.selectingElements && runtimeState.selectionTabId === tab.id) {
-        await sendToTab(tab.id, { type: 'START_PICKER' });
-      }
-    } catch { /* The page may have navigated during capture. */ }
+    if (simulating) {
+      try {
+        await sendToTab(tab.id, {
+          type: 'SET_SIMULATION_FRAME',
+          visible: true,
+          width: runtimeState.simulation.width,
+          height: runtimeState.simulation.height,
+          label: currentBreakpoint?.label || 'Responsive preview',
+        }, { frameId: 0 });
+        if (runtimeState.selectingElements && runtimeState.selectionTabId === tab.id) {
+          await sendToTab(tab.id, { type: 'START_PICKER' });
+        }
+      } catch { /* The page may have navigated during capture. */ }
+    } else if (attachedForCapture) {
+      try { await chrome.debugger.detach(debuggerTarget(tab.id)); } catch { /* The tab may have closed. */ }
+    }
   }
 }
 

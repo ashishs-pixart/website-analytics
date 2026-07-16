@@ -16,7 +16,7 @@ import type { ExtensionState, NetworkRequest, Target, ToastState } from './types
 import { captureReducer } from './utils/capture';
 import { formatBytes } from './utils/format';
 import { makePostmanCollection, makeSelectedFieldsExport, type ExportField } from './utils/export';
-import { elementFeedbackId, makeInspectPrompt } from './utils/inspectExport';
+import { elementFeedbackId, isFetchRequest, makeInspectPrompt } from './utils/inspectExport';
 
 const EMPTY_EXTENSION_STATE: ExtensionState = {
   screenshots: [],
@@ -50,6 +50,7 @@ export function App() {
   const [showInspectExport, setShowInspectExport] = useState(false);
   const [inspectPromptTarget, setInspectPromptTarget] = useState<'export' | 'copilot'>('export');
   const [includeMeaningfulRequests, setIncludeMeaningfulRequests] = useState(true);
+  const [inspectFetchOnly, setInspectFetchOnly] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showCopilot, setShowCopilot] = useState(false);
   const [copilotSession, setCopilotSession] = useState({ directory: '', output: '', running: false, stopping: false });
@@ -188,13 +189,13 @@ export function App() {
     setElementFeedback((current) => ({ ...current, [id]: value }));
   }, []);
 
-  const exportRequests = useCallback(async (format: ExportFormat, fields: Set<ExportField>) => {
+  const exportRequests = useCallback(async (format: ExportFormat, fields: Set<ExportField>, fetchOnly: boolean) => {
     setExporting(true);
     try {
-      let exportableRequests = filteredRequests;
+      let exportableRequests = fetchOnly ? filteredRequests.filter(isFetchRequest) : filteredRequests;
 
       if (format === 'selected' && fields.has('response')) {
-        exportableRequests = await Promise.all(filteredRequests.map(async (request) => {
+        exportableRequests = await Promise.all(exportableRequests.map(async (request) => {
           if (request.bodyCache != null || request.failed || request.finishedAt == null) return request;
           const result = await window.cdp.getResponseBody({ requestId: request.id });
           if (!result.ok) return request;
@@ -232,7 +233,7 @@ export function App() {
     try {
       const result = await window.cdp.saveFile({
         defaultPath: `website-improvements-${new Date().toISOString().replace(/[:.]/g, '-')}.md`,
-        content: makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests, includeMeaningfulRequests, elementFeedback, scope),
+        content: makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests, includeMeaningfulRequests, elementFeedback, scope, inspectFetchOnly),
       });
       if (result.ok) {
         setShowInspectExport(false);
@@ -243,7 +244,7 @@ export function App() {
     } finally {
       setExporting(false);
     }
-  }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, screenshotFeedback, showToast]);
+  }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, inspectFetchOnly, screenshotFeedback, showToast]);
 
   const selectCopilotDirectory = useCallback(async () => {
     const result = await window.cdp.selectCopilotDirectory();
@@ -271,8 +272,8 @@ export function App() {
     }) : [];
     const eventCount = scope.events ? extensionState.recordings.reduce((total, recording) => total + recording.actions.length, 0) : 0;
     if (!reviewed.length && !eventCount) return '';
-    return makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests, includeMeaningfulRequests, elementFeedback, scope);
-  }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, screenshotFeedback]);
+    return makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests, includeMeaningfulRequests, elementFeedback, scope, inspectFetchOnly);
+  }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, inspectFetchOnly, screenshotFeedback]);
 
   const addScopedPromptToChat = useCallback((scope: { breakpoints: boolean; events: boolean }) => {
     const prompt = makeScopedInspectPrompt(scope);
@@ -432,6 +433,7 @@ export function App() {
       {showExport && (
         <ExportModal
           requestCount={filteredRequests.length}
+          fetchRequestCount={filteredRequests.filter(isFetchRequest).length}
           scopeLabel={filterType === 'all' ? 'visible' : filterType}
           exporting={exporting}
           onClose={() => setShowExport(false)}
@@ -447,7 +449,9 @@ export function App() {
           elementFeedback={elementFeedback}
           exporting={exporting}
           includeMeaningfulRequests={includeMeaningfulRequests}
+          fetchOnly={inspectFetchOnly}
           onIncludeMeaningfulRequestsChange={setIncludeMeaningfulRequests}
+          onFetchOnlyChange={setInspectFetchOnly}
           networkRequests={allRequests}
           onFeedbackChange={changeFeedback}
           onActionFeedbackChange={changeActionFeedback}

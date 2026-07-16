@@ -53,6 +53,7 @@ export type NetworkEvent = {
     | 'response'
     | 'response-extra'
     | 'finished'
+    | 'response-body-hash'
     | 'failed'
     | 'ws-created'
     | 'ws-sent'
@@ -156,6 +157,41 @@ export type RecordedAction = {
       tagName: string;
       nthOfType: number;
     }>;
+    shadowPath?: Array<Array<{
+      tagName: string;
+      nthOfType: number;
+    }>>;
+    previousSiblingText?: string;
+    nextSiblingText?: string;
+    parentText?: string;
+    roleIndex?: { role: string; index: number; total: number } | null;
+    landmark?: { tagName: string; role: string; accessibleName: string } | null;
+    heading?: { text: string; level: number | null } | null;
+    form?: { action: string; method: string; name: string; id: string; accessibleName: string } | null;
+    visualFingerprint?: {
+      width: number;
+      height: number;
+      fontSize: string;
+      color: string;
+      backgroundColor: string;
+      display: string;
+    };
+    xpath?: string;
+    frameChain?: Array<{
+      url: string;
+      isTop: boolean;
+      frameName?: string;
+      frameTitle?: string;
+      hierarchyPath?: Array<{ tagName: string; nthOfType: number }>;
+    }>;
+    semanticFingerprint?: {
+      role?: string;
+      name?: string;
+      heading?: string;
+      form?: string;
+      parent?: string;
+      landmark?: string;
+    };
     domHierarchy?: Array<{
       tagName: string;
       id?: string;

@@ -344,6 +344,7 @@ Completed output:
       "replayEventId": "ACT-replay-add-to-cart",
       "sequence": 1,
       "description": "Click “Add to cart”",
+      "success": true,
       "replayStatus": "succeeded",
       "requests": {
         "match": true,
@@ -352,10 +353,13 @@ Completed output:
             "fingerprint": "POST example.test/api/cart Fetch",
             "baselineStatus": 200,
             "replayStatus": 200,
+            "responseSame": true,
+            "responseComparisonBasis": "body-hash",
+            "responseMessage": "Same response received.",
             "baselineDurationMs": 420,
             "replayDurationMs": 810,
-            "timingClassification": "regression",
-            "correlation": "time-window"
+            "deltaMs": 390,
+            "timingComparison": "slower"
           }
         ],
         "missing": [],
@@ -370,7 +374,7 @@ Completed output:
 }
 ```
 
-The `message` must be generated deterministically from counts and failures; the structured fields are the source of truth. Overall equivalence is:
+The text report and `message` must be generated deterministically from stored comparison data; no model is used. Response bodies are represented by SHA-256 hashes and are never placed in the replay result. If both hashes are available, `responseSame` means the status/error outcome and exact response body match. Otherwise `responseComparisonBasis` is `status-and-error`. Overall equivalence is:
 
 ```text
 equivalent = sequenceMatch && requestsMatch

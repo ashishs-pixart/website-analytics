@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const CDP = require('chrome-remote-interface');
 const { NetworkWatchStore } = require('../../../packages/store/src/network-watch-store');
 
@@ -123,7 +124,7 @@ function startExtensionBridge() {
 
     const recordingMatch = requestUrl.pathname.match(/^\/api\/recordings\/(REC-[^/]+)$/);
     if (request.method === 'GET' && recordingMatch) {
-      const recording = networkWatchStore.getRecording(decodeURIComponent(recordingMatch[1]));
+      const recording = networkWatchStore.getPublicRecording(decodeURIComponent(recordingMatch[1]));
       sendJson(recording ? 200 : 404, recording ? { ok: true, recording } : { ok: false, error: 'Recording not found' });
       return;
     }
@@ -573,13 +574,23 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
       });
     });
 
-    Network.loadingFinished(params => {
+    Network.loadingFinished(async params => {
       emitNetworkEvent({
         type: 'finished',
         requestId: params.requestId,
         timestamp: params.timestamp,
         encodedDataLength: params.encodedDataLength,
       });
+      try {
+        const responseBody = await Network.getResponseBody({ requestId: params.requestId });
+        emitNetworkEvent({
+          type: 'response-body-hash',
+          requestId: params.requestId,
+          responseBodyHash: crypto.createHash('sha256').update(responseBody.body || '').digest('hex'),
+        });
+      } catch (_) {
+        // Some cached, redirected, streaming, or opaque responses do not expose a body.
+      }
     });
 
     Network.loadingFailed(params => {

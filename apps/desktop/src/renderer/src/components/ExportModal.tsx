@@ -5,15 +5,17 @@ export type ExportFormat = 'postman' | 'selected';
 
 type ExportModalProps = {
   requestCount: number;
+  fetchRequestCount: number;
   scopeLabel: string;
   exporting: boolean;
   onClose: () => void;
-  onExport: (format: ExportFormat, fields: Set<ExportField>) => void;
+  onExport: (format: ExportFormat, fields: Set<ExportField>, fetchOnly: boolean) => void;
 };
 
-export function ExportModal({ requestCount, scopeLabel, exporting, onClose, onExport }: ExportModalProps) {
+export function ExportModal({ requestCount, fetchRequestCount, scopeLabel, exporting, onClose, onExport }: ExportModalProps) {
   const [format, setFormat] = useState<ExportFormat>('postman');
   const [fields, setFields] = useState<Set<ExportField>>(new Set(EXPORT_FIELDS.map((field) => field.id)));
+  const [fetchOnly, setFetchOnly] = useState(false);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -32,7 +34,8 @@ export function ExportModal({ requestCount, scopeLabel, exporting, onClose, onEx
     });
   };
 
-  const canExport = requestCount > 0 && (format === 'postman' || fields.size > 0) && !exporting;
+  const effectiveRequestCount = fetchOnly ? fetchRequestCount : requestCount;
+  const canExport = effectiveRequestCount > 0 && (format === 'postman' || fields.size > 0) && !exporting;
 
   return (
     <div id="modal-overlay" role="presentation" onMouseDown={(event) => {
@@ -42,7 +45,7 @@ export function ExportModal({ requestCount, scopeLabel, exporting, onClose, onEx
         <div className="modal-heading">
           <div>
             <h2 id="export-title">Export requests</h2>
-            <p className="modal-subtitle">{requestCount} {scopeLabel} request{requestCount === 1 ? '' : 's'} will be exported.</p>
+            <p className="modal-subtitle">{effectiveRequestCount} {scopeLabel} request{effectiveRequestCount === 1 ? '' : 's'} will be exported.</p>
           </div>
           <button className="modal-close" type="button" aria-label="Close export dialog" onClick={onClose} disabled={exporting}>×</button>
         </div>
@@ -57,6 +60,15 @@ export function ExportModal({ requestCount, scopeLabel, exporting, onClose, onEx
             <input type="radio" name="export-format" value="selected" checked={format === 'selected'} onChange={() => setFormat('selected')} />
             <span><strong>Selected fields</strong><small>A Markdown file containing only the data you choose below.</small></span>
           </label>
+        </fieldset>
+
+        <fieldset className="export-section" disabled={exporting}>
+          <legend>Filter requests</legend>
+          <label className={`export-option ${fetchOnly ? 'selected' : ''}`}>
+            <input type="checkbox" checked={fetchOnly} onChange={(event) => setFetchOnly(event.target.checked)} />
+            <span><strong>Only Fetch requests</strong><small>Exclude XHR, documents, CSS, JavaScript, images, fonts, and other resource types. {fetchRequestCount} request{fetchRequestCount === 1 ? '' : 's'} match.</small></span>
+          </label>
+          {fetchOnly && effectiveRequestCount === 0 && <p className="field-error">No Fetch requests are available in the current scope.</p>}
         </fieldset>
 
         <fieldset className="export-section" disabled={format !== 'selected' || exporting}>
@@ -74,7 +86,7 @@ export function ExportModal({ requestCount, scopeLabel, exporting, onClose, onEx
 
         <div className="modal-actions">
           <button className="btn btn-ghost" type="button" onClick={onClose} disabled={exporting}>Cancel</button>
-          <button className="btn btn-primary" type="button" onClick={() => onExport(format, fields)} disabled={!canExport}>
+          <button className="btn btn-primary" type="button" onClick={() => onExport(format, fields, fetchOnly)} disabled={!canExport}>
             {exporting ? 'Preparing export...' : 'Export'}
           </button>
         </div>

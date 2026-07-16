@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
+    <canvas id="shader-background" aria-hidden="true"></canvas>
     <header>
       <div><span class="mark">WA</span><strong>Website Analytics</strong></div>
       <span id="bridge-status" class="status">Checking app...</span>
@@ -16,7 +17,6 @@
       <section>
         <div class="section-heading"><h1>User journey</h1><span id="action-count" class="count">0</span></div>
         <label class="recording-control">
-          <span>Recording to replay</span>
           <select id="replay-recording" aria-label="Recording to replay"></select>
         </label>
         <div class="button-row">
@@ -27,8 +27,8 @@
 
       <section>
         <div class="section-heading"><h1>Simulation</h1></div>
-        <div class="resolution"><span>Current resolution</span><strong id="resolution">Not simulating</strong></div>
-        <label id="breakpoint-control" class="breakpoint-control" hidden><span>Choose paused breakpoint</span><input id="breakpoint-slider" type="range" min="0" max="10" step="1" value="0"><strong id="breakpoint-slider-label"></strong></label>
+        <div class="resolution"><strong id="resolution">Not simulating</strong></div>
+        <label id="breakpoint-control" class="breakpoint-control" hidden><input id="breakpoint-slider" type="range" min="0" max="10" step="1" value="0"><strong id="breakpoint-slider-label"></strong></label>
         <div class="button-row three">
           <button id="simulate" class="primary">Simulate</button>
           <button id="pause" disabled>Pause</button>

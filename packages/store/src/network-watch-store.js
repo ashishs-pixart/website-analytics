@@ -13,6 +13,14 @@ function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
+function withoutStoredResponse(value) {
+  if (Array.isArray(value)) return value.map(withoutStoredResponse);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== 'responseBodyHash')
+    .map(([key, item]) => [key, withoutStoredResponse(item)]));
+}
+
 function actionDescription(action) {
   const text = String(action.text || action.locator?.ariaLabel || action.locator?.text || '').trim().replace(/\s+/g, ' ').slice(0, 120);
   const target = text ? `“${text}”` : action.selector || action.tagName || 'the target';
@@ -87,6 +95,7 @@ function requestSnapshot(request) {
     statusText: request.statusText || '',
     failed: Boolean(request.failed),
     error: request.errorText || null,
+    responseBodyHash: request.responseBodyHash || null,
     durationMs: requestDuration(request),
     transferredBytes: request.encodedDataLength || 0,
     startedAt: request.wallTime ? new Date(request.wallTime * 1000).toISOString() : null,
@@ -136,6 +145,7 @@ function emptyRequest(id) {
     wallTime: null,
     failed: false,
     errorText: '',
+    responseBodyHash: null,
     encodedDataLength: 0,
     requestHeaders: {},
     requestExtraHeaders: {},
@@ -168,6 +178,8 @@ function applyNetworkEvent(current, event) {
   } else if (event.type === 'finished') {
     request.finishedAt = event.timestamp ?? request.finishedAt;
     request.encodedDataLength = event.encodedDataLength || 0;
+  } else if (event.type === 'response-body-hash') {
+    request.responseBodyHash = event.responseBodyHash || null;
   } else if (event.type === 'failed') {
     request.finishedAt = event.timestamp ?? request.finishedAt;
     request.failed = true;
@@ -202,6 +214,27 @@ function compareRequestLists(baseline = [], replay = []) {
   const missing = [];
   const reordered = [];
   const statusChanged = [];
+  const responseChanged = [];
+
+  function responseComparison(expected, actual) {
+    const outcomeSame = expected.status === actual.status
+      && Boolean(expected.failed) === Boolean(actual.failed)
+      && (expected.error || null) === (actual.error || null);
+    if (expected.responseBodyHash && actual.responseBodyHash) {
+      return {
+        same: outcomeSame && expected.responseBodyHash === actual.responseBodyHash,
+        basis: 'body-hash',
+      };
+    }
+    return { same: outcomeSame, basis: 'status-and-error' };
+  }
+
+  function timingComparison(baselineDurationMs, replayDurationMs) {
+    if (baselineDurationMs == null || replayDurationMs == null) return 'unknown';
+    if (replayDurationMs < baselineDurationMs) return 'faster';
+    if (replayDurationMs > baselineDurationMs) return 'slower';
+    return 'same';
+  }
 
   baseline.forEach((expected, expectedIndex) => {
     const actualIndex = replay.findIndex((candidate, index) => !usedReplay.has(index) && candidate.fingerprint === expected.fingerprint);
@@ -211,29 +244,51 @@ function compareRequestLists(baseline = [], replay = []) {
     }
     usedReplay.add(actualIndex);
     const actual = replay[actualIndex];
+    const response = responseComparison(expected, actual);
+    const deltaMs = expected.durationMs == null || actual.durationMs == null ? null : actual.durationMs - expected.durationMs;
+    const hierarchyAccepted = expected.actionSequence != null
+      && actual.actionSequence != null
+      && actual.actionSequence !== expected.actionSequence;
     const pair = {
       fingerprint: expected.fingerprint,
+      method: expected.method,
+      url: expected.url,
       baselineStatus: expected.status,
       replayStatus: actual.status,
+      responseSame: response.same,
+      responseComparisonBasis: response.basis,
+      responseMessage: response.same ? 'Same response received.' : 'A different response was received.',
       baselineDurationMs: expected.durationMs,
       replayDurationMs: actual.durationMs,
-      deltaMs: expected.durationMs == null || actual.durationMs == null ? null : actual.durationMs - expected.durationMs,
+      deltaMs,
+      timingComparison: timingComparison(expected.durationMs, actual.durationMs),
       baselineRequestId: expected.id,
       replayRequestId: actual.id,
+      baselineActionSequence: expected.actionSequence ?? null,
+      replayActionSequence: actual.actionSequence ?? null,
+      requestOccurrence: expected.requestOccurrence ?? null,
+      baselineJourneyPosition: expectedIndex + 1,
+      replayJourneyPosition: actualIndex + 1,
+      journeyPositionChanged: actualIndex !== expectedIndex,
+      hierarchyAccepted,
+      hierarchyMessage: hierarchyAccepted
+        ? `Matched occurrence ${expected.requestOccurrence} across action windows: recorded action ${expected.actionSequence}, replay action ${actual.actionSequence}.`
+        : null,
     };
-    if (actualIndex !== expectedIndex) reordered.push({ ...pair, expectedPosition: expectedIndex + 1, replayPosition: actualIndex + 1 });
     if (expected.status !== actual.status) statusChanged.push(pair);
+    if (!response.same && expected.status === actual.status) responseChanged.push(pair);
     matched.push(pair);
   });
 
   const unexpected = replay.filter((_request, index) => !usedReplay.has(index));
   return {
-    match: missing.length === 0 && unexpected.length === 0 && reordered.length === 0 && statusChanged.length === 0,
+    match: missing.length === 0 && unexpected.length === 0 && reordered.length === 0 && statusChanged.length === 0 && responseChanged.length === 0,
     matched,
     missing,
     unexpected,
     reordered,
     statusChanged,
+    responseChanged,
     ambiguous: [],
   };
 }
@@ -243,19 +298,34 @@ function deterministicSummary(summary) {
     ? `All ${summary.eventsTotal} actions replayed in order.`
     : `${summary.eventsSucceeded} of ${summary.eventsTotal} actions replayed successfully.`;
   const requestText = summary.requestsMatch
-    ? `${summary.matchedRequestCount} of ${summary.baselineRequestCount} expected requests matched.`
-    : `${summary.matchedRequestCount} of ${summary.baselineRequestCount} expected requests matched; ${summary.missingRequestCount} missing, ${summary.unexpectedRequestCount} unexpected, ${summary.reorderedRequestCount} reordered, and ${summary.statusChangedRequestCount} status changed.`;
+    ? `${summary.matchedRequestCount} of ${summary.baselineRequestCount} expected request occurrences matched${summary.crossActionRequestCount ? `; ${summary.crossActionRequestCount} matched across different action windows` : ''}.`
+    : `${summary.matchedRequestCount} of ${summary.baselineRequestCount} expected request occurrences matched; ${summary.crossActionRequestCount} matched across different action windows, ${summary.missingRequestCount} missing, ${summary.unexpectedRequestCount} unexpected, ${summary.statusChangedRequestCount} status changed, and ${summary.responseChangedRequestCount} other responses changed.`;
   return `${actionText} ${requestText}`;
 }
 
+function addRequestOccurrences(requests) {
+  const counts = new Map();
+  return requests.map(request => {
+    const occurrence = (counts.get(request.fingerprint) || 0) + 1;
+    counts.set(request.fingerprint, occurrence);
+    return { ...request, requestOccurrence: occurrence };
+  });
+}
+
 function compareReplay(sourceRecording, replayRecording) {
-  const replayBySourceId = new Map((replayRecording.actions || []).map(action => [action.sourceActionId, action]));
+  const sourceActions = sourceRecording.actions || [];
+  const replayActions = replayRecording.actions || [];
+  const replayBySourceId = new Map(replayActions.map(action => [action.sourceActionId, action]));
+  const baselineRequests = addRequestOccurrences(sourceActions.flatMap((action, index) =>
+    (sourceRecording.requestEvidence?.[action.id] || []).map(request => ({ ...request, actionSequence: index + 1 }))));
+  const replayRequests = addRequestOccurrences(replayActions.flatMap((action, index) =>
+    (replayRecording.requestEvidence?.[action.id] || []).map(request => ({ ...request, actionSequence: action.sequence || index + 1 }))));
+  const hierarchyComparison = compareRequestLists(baselineRequests, replayRequests);
   const events = [];
   let firstMismatch = null;
   let eventsSucceeded = 0;
-  const totals = { matched: 0, baseline: 0, replay: 0, missing: 0, unexpected: 0, reordered: 0, statusChanged: 0, ambiguous: 0 };
 
-  (sourceRecording.actions || []).forEach((sourceAction, index) => {
+  sourceActions.forEach((sourceAction, index) => {
     const replayAction = replayBySourceId.get(sourceAction.id);
     const outcomeSucceeded = replayAction?.outcome === 'success';
     if (outcomeSucceeded) eventsSucceeded += 1;
@@ -267,42 +337,48 @@ function compareReplay(sourceRecording, replayRecording) {
         error: replayAction?.replayError || (!replayAction ? 'The action was not replayed.' : 'The action was replayed out of sequence.'),
       };
     }
-    const baselineRequests = sourceRecording.requestEvidence?.[sourceAction.id] || [];
-    const replayRequests = replayAction ? replayRecording.requestEvidence?.[replayAction.id] || [] : [];
-    const requests = compareRequestLists(baselineRequests, replayRequests);
-    totals.baseline += baselineRequests.length;
-    totals.replay += replayRequests.length;
-    totals.matched += requests.matched.length;
-    totals.missing += requests.missing.length;
-    totals.unexpected += requests.unexpected.length;
-    totals.reordered += requests.reordered.length;
-    totals.statusChanged += requests.statusChanged.length;
-    totals.ambiguous += requests.ambiguous.length;
+    const sequence = index + 1;
+    const requests = {
+      matched: hierarchyComparison.matched.filter(request => request.baselineActionSequence === sequence),
+      missing: hierarchyComparison.missing.filter(request => request.actionSequence === sequence),
+      unexpected: hierarchyComparison.unexpected.filter(request => request.actionSequence === sequence),
+      reordered: hierarchyComparison.reordered.filter(request => request.baselineActionSequence === sequence),
+      statusChanged: hierarchyComparison.statusChanged.filter(request => request.baselineActionSequence === sequence),
+      responseChanged: hierarchyComparison.responseChanged.filter(request => request.baselineActionSequence === sequence),
+      ambiguous: [],
+    };
+    requests.match = requests.missing.length === 0
+      && requests.unexpected.length === 0
+      && requests.reordered.length === 0
+      && requests.statusChanged.length === 0
+      && requests.responseChanged.length === 0;
     events.push({
       sourceEventId: sourceAction.id,
       replayEventId: replayAction?.id || null,
-      sequence: index + 1,
+      sequence,
       description: sourceAction.description || actionDescription(sourceAction),
+      success: outcomeSucceeded,
       replayStatus: outcomeSucceeded ? 'succeeded' : 'failed',
       replayError: replayAction?.replayError || null,
       requests,
     });
   });
 
-  const eventsTotal = sourceRecording.actions?.length || 0;
-  if (!firstMismatch && (replayRecording.actions?.length || 0) !== eventsTotal) {
-    const extraAction = replayRecording.actions?.[eventsTotal];
+  const eventsTotal = sourceActions.length;
+  if (!firstMismatch && replayActions.length !== eventsTotal) {
+    const extraAction = replayActions[eventsTotal];
     firstMismatch = {
-      sequence: Math.min(eventsTotal, replayRecording.actions?.length || 0) + 1,
+      sequence: Math.min(eventsTotal, replayActions.length) + 1,
       expectedActionId: null,
       actualActionId: extraAction?.id || null,
-      error: (replayRecording.actions?.length || 0) > eventsTotal
+      error: replayActions.length > eventsTotal
         ? 'The replay produced an extra action.'
         : 'The replay ended before all recorded actions ran.',
     };
   }
-  const sequenceMatch = !firstMismatch && (replayRecording.actions?.length || 0) === eventsTotal;
-  const requestsMatch = totals.missing === 0 && totals.unexpected === 0 && totals.reordered === 0 && totals.statusChanged === 0 && totals.ambiguous === 0;
+  const sequenceMatch = !firstMismatch && replayActions.length === eventsTotal;
+  const requestsMatch = hierarchyComparison.match;
+  const hierarchyAcceptedRequestCount = hierarchyComparison.matched.filter(request => request.hierarchyAccepted).length;
   const summary = {
     equivalent: sequenceMatch && requestsMatch,
     sequenceMatch,
@@ -310,14 +386,17 @@ function compareReplay(sourceRecording, replayRecording) {
     eventsTotal,
     eventsSucceeded,
     eventsFailed: eventsTotal - eventsSucceeded,
-    baselineRequestCount: totals.baseline,
-    replayRequestCount: totals.replay,
-    matchedRequestCount: totals.matched,
-    missingRequestCount: totals.missing,
-    unexpectedRequestCount: totals.unexpected,
-    reorderedRequestCount: totals.reordered,
-    statusChangedRequestCount: totals.statusChanged,
-    ambiguousRequestCount: totals.ambiguous,
+    baselineRequestCount: baselineRequests.length,
+    replayRequestCount: replayRequests.length,
+    matchedRequestCount: hierarchyComparison.matched.length,
+    hierarchyAcceptedRequestCount,
+    crossActionRequestCount: hierarchyAcceptedRequestCount,
+    missingRequestCount: hierarchyComparison.missing.length,
+    unexpectedRequestCount: hierarchyComparison.unexpected.length,
+    reorderedRequestCount: hierarchyComparison.reordered.length,
+    statusChangedRequestCount: hierarchyComparison.statusChanged.length,
+    responseChangedRequestCount: hierarchyComparison.responseChanged.length,
+    ambiguousRequestCount: hierarchyComparison.ambiguous.length,
   };
   summary.message = deterministicSummary(summary);
   return { summary, events, firstMismatch };
@@ -386,6 +465,28 @@ class NetworkWatchStore {
     while (this.networkOrder.length > MAX_NETWORK_REQUESTS) {
       this.networkRequests.delete(this.networkOrder.shift());
     }
+    if (event.type === 'response-body-hash' && event.responseBodyHash) {
+      let recordingChanged = false;
+      for (const recording of this.recordings) {
+        for (const requests of Object.values(recording.requestEvidence || {})) {
+          for (const request of requests) {
+            if (request.id === event.requestId && request.responseBodyHash !== event.responseBodyHash) {
+              request.responseBodyHash = event.responseBodyHash;
+              recordingChanged = true;
+            }
+          }
+        }
+      }
+      if (recordingChanged) {
+        for (const job of this.jobs) {
+          if (job.status !== 'completed' || !job.replayId) continue;
+          const source = this.getRecording(job.recordingId);
+          const replay = this.getRecording(job.replayId);
+          if (source && replay) job.comparison = compareReplay(source, replay);
+        }
+        this.persist();
+      }
+    }
   }
 
   networkSnapshot() {
@@ -410,7 +511,7 @@ class NetworkWatchStore {
       }
     }
     this.persist();
-    return clone(recording);
+    return withoutStoredResponse(recording);
   }
 
   listRecordings({ limit = 20, cursor = 0 } = {}) {
@@ -441,6 +542,11 @@ class NetworkWatchStore {
 
   getRecording(id) {
     return this.recordings.find(recording => recording.id === id) || null;
+  }
+
+  getPublicRecording(id) {
+    const recording = this.getRecording(id);
+    return recording ? withoutStoredResponse(recording) : null;
   }
 
   clearRecordings() {
@@ -478,7 +584,7 @@ class NetworkWatchStore {
     job.status = 'running';
     job.startedAt = new Date().toISOString();
     this.persist();
-    return { job: clone(job), recording: clone(this.getRecording(job.recordingId)) };
+    return { job: withoutStoredResponse(job), recording: this.getPublicRecording(job.recordingId) };
   }
 
   failReplayJob(runId, error) {
@@ -490,7 +596,8 @@ class NetworkWatchStore {
   }
 
   getReplayJob(runId) {
-    return clone(this.jobs.find(job => job.runId === runId || job.replayId === runId) || null);
+    const job = this.jobs.find(job => job.runId === runId || job.replayId === runId) || null;
+    return job ? withoutStoredResponse(job) : null;
   }
 
   exportRecording({ recordingId, runId = null, format = 'markdown' }) {
@@ -498,12 +605,12 @@ class NetworkWatchStore {
     if (!recording) throw new Error(`Recording ${recordingId} was not found.`);
     const job = runId ? this.jobs.find(item => item.runId === runId || item.replayId === runId) : this.jobs.find(item => item.recordingId === recordingId && item.status === 'completed');
     const replay = job?.replayId ? this.getRecording(job.replayId) : null;
-    const bundle = { exportedAt: new Date().toISOString(), recording: clone(recording), replay: clone(replay), comparison: clone(job?.comparison || null) };
+    const bundle = withoutStoredResponse({ exportedAt: new Date().toISOString(), recording, replay, comparison: job?.comparison || null });
     return { format, content: format === 'json' ? JSON.stringify(bundle, null, 2) : markdownExport(bundle), data: bundle };
   }
 
   exportNetwork(format = 'json') {
-    const data = { exportedAt: new Date().toISOString(), source: 'Network Watch', requestCount: this.networkOrder.length, requests: this.networkSnapshot() };
+    const data = withoutStoredResponse({ exportedAt: new Date().toISOString(), source: 'Network Watch', requestCount: this.networkOrder.length, requests: this.networkSnapshot() });
     if (format === 'json') return { format, content: JSON.stringify(data, null, 2), data };
     const content = ['# Network Watch request export', '', `- Exported: ${data.exportedAt}`, `- Requests: ${data.requestCount}`, '', ...data.requests.map((request, index) => `## ${index + 1}. ${request.method} ${request.url}\n\n- Status: ${request.status ?? 'pending'}\n- Type: ${request.resourceType}\n- Duration: ${request.durationMs == null ? 'unknown' : `${Math.round(request.durationMs)} ms`}\n- Bytes: ${request.transferredBytes}`)].join('\n');
     return { format, content, data };

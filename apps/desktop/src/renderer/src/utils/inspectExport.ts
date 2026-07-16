@@ -38,6 +38,10 @@ export function meaningfulRequestInsights(requests: NetworkRequest[]) {
   }).filter((entry): entry is [string, string[]] => entry[1].length > 0));
 }
 
+export function isFetchRequest(request: NetworkRequest) {
+  return request.resourceType.toLowerCase() === 'fetch';
+}
+
 export function elementFeedbackId(screenshotId: string, elementIndex: number) {
   return `${screenshotId}:element:${elementIndex}`;
 }
@@ -51,8 +55,10 @@ export function makeInspectPrompt(
   includeMeaningfulRequests = true,
   elementFeedback: Record<string, string> = {},
   scope: { breakpoints: boolean; events: boolean } = { breakpoints: true, events: true },
+  fetchOnly = false,
 ) {
-  const insights = meaningfulRequestInsights(networkRequests);
+  const exportableNetworkRequests = fetchOnly ? networkRequests.filter(isFetchRequest) : networkRequests;
+  const insights = meaningfulRequestInsights(exportableNetworkRequests);
   const reviewed = scope.breakpoints ? screenshots.filter((screenshot) => {
     const elements = screenshot.elements?.length ? screenshot.elements : screenshot.element ? [screenshot.element] : [];
     return feedback[screenshot.id]?.trim() || elements.some((_element, index) => elementFeedback[elementFeedbackId(screenshot.id, index)]?.trim());
@@ -106,7 +112,7 @@ export function makeInspectPrompt(
     const events = recording.actions.map((action, actionIndex) => {
       const requestedChange = actionFeedback[action.id]?.trim();
       const requests = includeMeaningfulRequests
-        ? relatedRequests(recording, actionIndex, networkRequests).filter(request => insights.has(request.id))
+        ? relatedRequests(recording, actionIndex, exportableNetworkRequests).filter(request => insights.has(request.id))
         : [];
       const requestEvidence = requests.length
         ? requests.map((request) => {
@@ -117,7 +123,9 @@ export function makeInspectPrompt(
           const reason = insights.get(request.id)?.join('; ');
           return `- ${request.method} ${request.url} → ${request.status ?? 'pending'}${duration == null ? '' : ` in ${Math.round(duration)} ms`}; ${request.encodedDataLength || 0} bytes; ${request.mimeType || 'unknown type'}; ${bodyEvidence}${reason ? `; insight: ${reason}` : ''}`;
         }).join('\n')
-        : includeMeaningfulRequests ? '- No meaningful network requests were found in this action window.' : '- Meaningful request analysis was excluded by the user.';
+        : includeMeaningfulRequests
+          ? `- No meaningful ${fetchOnly ? 'Fetch ' : ''}network requests were found in this action window.`
+          : '- Meaningful request analysis was excluded by the user.';
 
       return [
         `### Event ${actionIndex + 1}: ${action.id}`,

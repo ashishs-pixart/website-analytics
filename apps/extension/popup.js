@@ -23,6 +23,70 @@ let state = null;
 let busy = false;
 let selectedRecordingId = '';
 
+function startBackgroundShader() {
+  const canvas = document.querySelector('#shader-background');
+  const gl = canvas?.getContext('webgl', { alpha: true, antialias: false, powerPreference: 'low-power' });
+  if (!gl) return;
+
+  const compile = (type, source) => {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return gl.getShaderParameter(shader, gl.COMPILE_STATUS) ? shader : null;
+  };
+  const vertex = compile(gl.VERTEX_SHADER, `
+    attribute vec2 position;
+    void main() { gl_Position = vec4(position, 0.0, 1.0); }
+  `);
+  const fragment = compile(gl.FRAGMENT_SHADER, `
+    precision mediump float;
+    uniform vec2 resolution;
+    uniform float time;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+    void main() {
+      vec2 uv = gl_FragCoord.xy / resolution;
+      float scan = sin((uv.y * 240.0) + time * 0.8) * 0.018;
+      float beam = smoothstep(0.8, 0.0, abs(fract(uv.y * 8.0 + time * 0.025) - 0.5)) * 0.035;
+      float grain = (hash(floor(gl_FragCoord.xy * 0.5) + time) - 0.5) * 0.025;
+      float vignette = 1.0 - smoothstep(0.15, 0.92, length(uv - 0.5) * 1.35);
+      float light = max(0.0, 0.025 + scan + beam + grain + vignette * 0.055);
+      gl_FragColor = vec4(vec3(light), 0.92);
+    }
+  `);
+  if (!vertex || !fragment) return;
+  const program = gl.createProgram();
+  gl.attachShader(program, vertex);
+  gl.attachShader(program, fragment);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return;
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+  gl.useProgram(program);
+  const position = gl.getAttribLocation(program, 'position');
+  const resolution = gl.getUniformLocation(program, 'resolution');
+  const time = gl.getUniformLocation(program, 'time');
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+
+  const draw = timestamp => {
+    const scale = Math.min(window.devicePixelRatio || 1, 1.5);
+    const width = Math.round(canvas.clientWidth * scale);
+    const height = Math.round(canvas.clientHeight * scale);
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+      gl.viewport(0, 0, width, height);
+    }
+    gl.uniform2f(resolution, width, height);
+    gl.uniform1f(time, timestamp * 0.001);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) requestAnimationFrame(draw);
+  };
+  requestAnimationFrame(draw);
+}
+
 function showMessage(message, kind = '') {
   elements.message.textContent = message || '';
   elements.message.className = kind;
@@ -83,8 +147,8 @@ function render(nextState) {
   elements.breakpointSliderLabel.textContent = sliderBreakpoint ? `${sliderBreakpoint.width} × ${sliderBreakpoint.height}` : '';
   elements.selectElement.disabled = busy;
   elements.selectElement.textContent = state.selectingElements ? 'Stop selecting elements' : 'Select elements';
-  elements.screenshot.disabled = busy || !simulation.active || !state.bridgeConnected;
   const selections = state.selectedElements || [];
+  elements.screenshot.disabled = busy || !state.bridgeConnected || !selections.length;
   elements.selectedElement.textContent = selections.length ? `${selections.length} selected · ${selections.map(element => element.selector).join(', ')}` : 'No elements selected';
   elements.selectedElement.title = selections.map(element => element.selector).join('\n');
   const captureCount = state.capturedBreakpoints?.length || 0;
@@ -163,3 +227,4 @@ elements.breakpointSlider.addEventListener('change', event => request('SET_BREAK
 
 refresh();
 setInterval(refresh, 900);
+startBackgroundShader();

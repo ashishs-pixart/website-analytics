@@ -752,7 +752,7 @@ async function applyInputAction(element, action) {
 function findReplayElement(action) {
   const locator = action.locator || {};
   const expectedTag = locator.tagName || action.tagName || '*';
-  const candidates = queryAllOpenRoots(expectedTag);
+  const candidates = queryAllOpenRoots(expectedTag).filter(isVisibleElement);
   const uniqueMatch = predicate => {
     const matches = candidates.filter(predicate);
     return matches.length === 1 ? matches[0] : null;
@@ -819,7 +819,7 @@ function findReplayElement(action) {
 
   // CSS is deliberately below user-facing locators because DOM structure and generated IDs are brittle.
   try {
-    const matches = queryAllOpenRoots(action.selector);
+    const matches = queryAllOpenRoots(action.selector).filter(isVisibleElement);
     if (matches.length === 1) return { element: matches[0], method: 'css-selector' };
   } catch { /* Continue with similarity and coordinate fallbacks. */ }
 
@@ -886,20 +886,12 @@ function findReplayElement(action) {
     return { element: scored[0].candidate, method: `semantic-fingerprint:${scored[0].score}` };
   }
   const hierarchyElement = elementFromHierarchyPath(locator.hierarchyPath);
-  if (hierarchyElement) return { element: hierarchyElement, method: 'html-hierarchy-fallback' };
+  if (hierarchyElement && isVisibleElement(hierarchyElement)) return { element: hierarchyElement, method: 'html-hierarchy-fallback' };
   const shadowElement = elementFromShadowPath(locator.shadowPath);
-  if (shadowElement) return { element: shadowElement, method: 'shadow-hierarchy-fallback' };
+  if (shadowElement && isVisibleElement(shadowElement)) return { element: shadowElement, method: 'shadow-hierarchy-fallback' };
   const xpathElement = elementFromXPath(locator.xpath);
-  if (xpathElement instanceof Element) return { element: xpathElement, method: 'xpath-fallback' };
+  if (xpathElement instanceof Element && isVisibleElement(xpathElement)) return { element: xpathElement, method: 'xpath-fallback' };
   return { element: null, method: '' };
-}
-
-function findReplayElementByHierarchy(action) {
-  const path = action.locator?.hierarchyPath;
-  const element = elementFromHierarchyPath(path);
-  return element
-    ? { element, method: 'exact-html-hierarchy' }
-    : { element: null, method: Array.isArray(path) ? 'html-hierarchy-not-found' : 'html-hierarchy-not-recorded' };
 }
 
 async function findReplayElementWithRetry(action, timeoutMs = 1800) {
