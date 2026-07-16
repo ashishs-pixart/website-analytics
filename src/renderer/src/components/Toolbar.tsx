@@ -68,7 +68,7 @@ export function Toolbar({
       <div className="toolbar-right">
         <span className={`badge badge-${status.kind}`}>{status.text}</span>
         <button className="btn btn-ghost" onClick={onClear}>Clear</button>
-        <button className="btn btn-ghost" onClick={onExport}>HAR</button>
+        <button className="btn btn-ghost" onClick={onExport}>Export</button>
       </div>
     </header>
   );

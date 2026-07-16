@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Website Analytics</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <div><span class="mark">WA</span><strong>Website Analytics</strong></div>
+      <span id="bridge-status" class="status">Checking app...</span>
+    </header>
+
+    <main>
+      <section>
+        <div class="section-heading"><div><h1>User journey</h1><p>Record website actions, then replay them while Network Watch captures requests.</p></div><span id="action-count" class="count">0</span></div>
+        <div class="button-row">
+          <button id="record" class="primary">Record</button>
+          <button id="replay">Replay</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-heading"><div><h1>Responsive simulation</h1><p>Render five fitted desktop breakpoints, refreshing at each size.</p></div></div>
+        <div class="resolution"><span>Current resolution</span><strong id="resolution">Not simulating</strong></div>
+        <div class="button-row three">
+          <button id="simulate" class="primary">Simulate</button>
+          <button id="pause" disabled>Pause</button>
+          <button id="stop" disabled>Stop</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-heading"><div><h1>Inspect snapshot</h1><p>Pause first, select an element, then capture the full page.</p></div></div>
+        <div id="selected-element" class="selection">No element selected</div>
+        <div class="button-row">
+          <button id="select-element" disabled>Select element</button>
+          <button id="screenshot" class="primary" disabled>Screenshot</button>
+        </div>
+      </section>
+
+      <div id="message" role="status"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

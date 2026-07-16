@@ -1,18 +1,32 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { FilterBar } from './components/FilterBar';
+import { ExportModal, type ExportFormat } from './components/ExportModal';
 import { HelpModal } from './components/HelpModal';
+import { InspectDashboard } from './components/InspectDashboard';
+import { InspectExportModal } from './components/InspectExportModal';
+import { ModeBar, type AppMode } from './components/ModeBar';
 import { RequestDetails } from './components/RequestDetails';
 import { RequestTable } from './components/RequestTable';
 import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
 import { Toolbar } from './components/Toolbar';
 import type { DetailTab, StatusKind } from './constants';
-import type { NetworkRequest, Target, ToastState } from './types';
+import type { ExtensionState, NetworkRequest, Target, ToastState } from './types';
 import { captureReducer } from './utils/capture';
 import { formatBytes } from './utils/format';
-import { makeHar } from './utils/har';
+import { makePostmanCollection, makeSelectedFieldsExport, type ExportField } from './utils/export';
+import { makeInspectPrompt } from './utils/inspectExport';
+
+const EMPTY_EXTENSION_STATE: ExtensionState = {
+  screenshots: [],
+  recordings: [],
+  lastExtensionActivity: null,
+  connected: false,
+  bridgePort: 9231,
+};
 
 export function App() {
+  const [mode, setMode] = useState<AppMode>('network');
   const [host, setHost] = useState('localhost');
   const [port, setPort] = useState(9222);
   const [targets, setTargets] = useState<Target[]>([]);
@@ -31,6 +45,12 @@ export function App() {
   const [toast, setToast] = useState<ToastState>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('headers');
   const [detailWidth, setDetailWidth] = useState('43%');
+  const [showExport, setShowExport] = useState(false);
+  const [showInspectExport, setShowInspectExport] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [extensionState, setExtensionState] = useState<ExtensionState>(EMPTY_EXTENSION_STATE);
+  const [screenshotFeedback, setScreenshotFeedback] = useState<Record<string, string>>({});
+  const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
   const exportRef = useRef(() => {});
 
   const showToast = useCallback((message: string) => {
@@ -40,6 +60,7 @@ export function App() {
   }, []);
 
   const totalBytes = useMemo(() => Array.from(requests.values()).reduce((sum, req) => sum + (req.encodedDataLength || 0), 0), [requests]);
+  const allRequests = useMemo(() => order.map((id) => requests.get(id)).filter((request): request is NetworkRequest => Boolean(request)), [order, requests]);
   const selectedRequest = selectedId ? requests.get(selectedId) : undefined;
 
   const filteredRequests = useMemo(() => {
@@ -125,14 +146,92 @@ export function App() {
     setSelectedId(null);
   }, []);
 
-  const exportHar = useCallback(async () => {
-    const content = JSON.stringify(makeHar(order, requests), null, 2);
-    const result = await window.cdp.saveFile({ defaultPath: `network-${new Date().toISOString().replace(/[:.]/g, '-')}.har`, content });
-    if (result.ok) showToast('HAR exported');
-    else if (!result.canceled) showToast(result.error || 'Export failed');
-  }, [order, requests, showToast]);
+  const openExport = useCallback(() => setShowExport(true), []);
 
-  exportRef.current = exportHar;
+  const loadExtensionData = useCallback(async () => {
+    if (!window.cdp) return;
+    const result = await window.cdp.getExtensionData();
+    if (result.ok) setExtensionState(result.state);
+  }, []);
+
+  const clearExtensionData = useCallback(async () => {
+    const result = await window.cdp.clearExtensionData();
+    if (result.ok) {
+      setExtensionState(result.state);
+      setScreenshotFeedback({});
+      setActionFeedback({});
+      showToast('Extension data cleared');
+    }
+  }, [showToast]);
+
+  const changeFeedback = useCallback((id: string, value: string) => {
+    setScreenshotFeedback((current) => ({ ...current, [id]: value }));
+  }, []);
+
+  const changeActionFeedback = useCallback((id: string, value: string) => {
+    setActionFeedback((current) => ({ ...current, [id]: value }));
+  }, []);
+
+  const exportRequests = useCallback(async (format: ExportFormat, fields: Set<ExportField>) => {
+    setExporting(true);
+    try {
+      let exportableRequests = filteredRequests;
+
+      if (format === 'selected' && fields.has('response')) {
+        exportableRequests = await Promise.all(filteredRequests.map(async (request) => {
+          if (request.bodyCache != null || request.failed || request.finishedAt == null) return request;
+          const result = await window.cdp.getResponseBody({ requestId: request.id });
+          if (!result.ok) return request;
+          dispatchCapture({ type: 'body', requestId: request.id, body: result.body, base64Encoded: result.base64Encoded });
+          return { ...request, bodyCache: result.body, bodyBase64: result.base64Encoded };
+        }));
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const isPostman = format === 'postman';
+      const data = isPostman ? makePostmanCollection(exportableRequests) : makeSelectedFieldsExport(exportableRequests, fields);
+      const result = await window.cdp.saveFile({
+        defaultPath: isPostman ? `network-postman-${timestamp}.json` : `network-export-${timestamp}.json`,
+        content: JSON.stringify(data, null, 2),
+      });
+      if (result.ok) {
+        setShowExport(false);
+        showToast(isPostman ? 'Postman collection exported' : 'Selected fields exported');
+      } else if (!result.canceled) {
+        showToast(result.error || 'Export failed');
+      }
+    } finally {
+      setExporting(false);
+    }
+  }, [filteredRequests, showToast]);
+
+  const exportInspectPrompt = useCallback(async () => {
+    const reviewed = extensionState.screenshots.filter((screenshot) => screenshotFeedback[screenshot.id]?.trim());
+    const reviewedActionCount = Object.values(actionFeedback).filter((value) => value.trim()).length;
+    if (!reviewed.length && !reviewedActionCount) return;
+    setExporting(true);
+    try {
+      const result = await window.cdp.saveFile({
+        defaultPath: `website-improvements-${new Date().toISOString().replace(/[:.]/g, '-')}.md`,
+        content: makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests),
+      });
+      if (result.ok) {
+        setShowInspectExport(false);
+        showToast('Improvement prompt exported');
+      } else if (!result.canceled) {
+        showToast(result.error || 'Export failed');
+      }
+    } finally {
+      setExporting(false);
+    }
+  }, [actionFeedback, allRequests, extensionState.recordings, extensionState.screenshots, screenshotFeedback, showToast]);
+
+  const openModeExport = useCallback(() => {
+    if (mode === 'inspect') setShowInspectExport(true);
+    else setShowExport(true);
+  }, [mode]);
+
+  exportRef.current = openModeExport;
 
   const loadResponseBody = useCallback(async (requestId: string) => {
     const result = await window.cdp.getResponseBody({ requestId });
@@ -157,10 +256,17 @@ export function App() {
       setCurrentTargetLabel('');
       showToast('Browser target disconnected');
     });
-    window.cdp.onExportHar(() => exportRef.current());
+    window.cdp.onExportRequests(() => exportRef.current());
     window.cdp.onShowHelp(() => setShowHelp(true));
     return () => window.cdp.removeAllListeners();
   }, [showToast]);
+
+  useEffect(() => {
+    if (!window.cdp) return;
+    loadExtensionData();
+    const interval = window.setInterval(loadExtensionData, 1000);
+    return () => window.clearInterval(interval);
+  }, [loadExtensionData]);
 
   const startResize = useCallback(() => {
     const onMove = (event: MouseEvent) => {
@@ -195,27 +301,70 @@ export function App() {
         onScan={scanTargets}
         onAttach={attachSelected}
         onDetach={detach}
-        onClear={clearRequests}
-        onExport={exportHar}
+        onClear={mode === 'network' ? clearRequests : clearExtensionData}
+        onExport={openModeExport}
       />
-      <FilterBar
-        filterText={filterText}
-        filterType={filterType}
-        errorsOnly={errorsOnly}
-        requestCount={filteredRequests.length}
-        onFilterTextChange={setFilterText}
-        onFilterTypeChange={setFilterType}
-        onErrorsOnlyChange={setErrorsOnly}
+      <ModeBar
+        mode={mode}
+        screenshotCount={extensionState.screenshots.length}
+        extensionConnected={extensionState.connected}
+        onChange={setMode}
       />
-      <main id="split-pane">
-        <RequestTable requests={filteredRequests} totalCount={order.length} selectedId={selectedId} onSelect={setSelectedId} />
-        <div id="resize-handle" onMouseDown={startResize} />
-        <div id="detail-panel" style={{ width: detailWidth }}>
-          <RequestDetails request={selectedRequest} activeTab={activeTab} setActiveTab={setActiveTab} onLoadBody={loadResponseBody} />
-        </div>
-      </main>
-      <StatusBar requestCount={order.length} totalBytes={totalBytes} currentTargetLabel={currentTargetLabel} />
+      {mode === 'network' ? (
+        <>
+          <FilterBar
+            filterText={filterText}
+            filterType={filterType}
+            errorsOnly={errorsOnly}
+            requestCount={filteredRequests.length}
+            onFilterTextChange={setFilterText}
+            onFilterTypeChange={setFilterType}
+            onErrorsOnlyChange={setErrorsOnly}
+          />
+          <main id="split-pane">
+            <RequestTable requests={filteredRequests} totalCount={order.length} selectedId={selectedId} onSelect={setSelectedId} />
+            <div id="resize-handle" onMouseDown={startResize} />
+            <div id="detail-panel" style={{ width: detailWidth }}>
+              <RequestDetails request={selectedRequest} activeTab={activeTab} setActiveTab={setActiveTab} onLoadBody={loadResponseBody} />
+            </div>
+          </main>
+          <StatusBar requestCount={order.length} totalBytes={totalBytes} currentTargetLabel={currentTargetLabel} />
+        </>
+      ) : (
+        <InspectDashboard
+          state={extensionState}
+          feedback={screenshotFeedback}
+          actionFeedback={actionFeedback}
+          networkRequests={allRequests}
+          onFeedbackChange={changeFeedback}
+          onActionFeedbackChange={changeActionFeedback}
+          onRefresh={loadExtensionData}
+          onClear={clearExtensionData}
+        />
+      )}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+      {showExport && (
+        <ExportModal
+          requestCount={filteredRequests.length}
+          scopeLabel={filterType === 'all' ? 'visible' : filterType}
+          exporting={exporting}
+          onClose={() => setShowExport(false)}
+          onExport={exportRequests}
+        />
+      )}
+      {showInspectExport && (
+        <InspectExportModal
+          screenshots={extensionState.screenshots}
+          feedback={screenshotFeedback}
+          recordings={extensionState.recordings}
+          actionFeedback={actionFeedback}
+          exporting={exporting}
+          onFeedbackChange={changeFeedback}
+          onActionFeedbackChange={changeActionFeedback}
+          onClose={() => setShowInspectExport(false)}
+          onExport={exportInspectPrompt}
+        />
+      )}
       <Toast toast={toast} />
     </>
   );

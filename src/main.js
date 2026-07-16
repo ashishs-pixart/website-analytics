@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, Menu, shell, dialog } = require('electron');
 const { spawn } = require('child_process');
+const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const CDP = require('chrome-remote-interface');
@@ -7,6 +8,112 @@ const CDP = require('chrome-remote-interface');
 let mainWindow;
 let activeClient = null;
 let activeTarget = null;
+let extensionBridge = null;
+const EXTENSION_BRIDGE_PORT = 9231;
+const extensionState = {
+  screenshots: [],
+  recordings: [],
+  lastExtensionActivity: null,
+};
+
+function extensionStateSnapshot() {
+  return {
+    ...extensionState,
+    connected: extensionState.lastExtensionActivity
+      ? Date.now() - new Date(extensionState.lastExtensionActivity).getTime() < 15000
+      : false,
+    bridgePort: EXTENSION_BRIDGE_PORT,
+  };
+}
+
+function startExtensionBridge() {
+  if (extensionBridge) return;
+
+  extensionBridge = http.createServer((request, response) => {
+    const origin = request.headers.origin;
+    if (origin && !origin.startsWith('chrome-extension://')) {
+      response.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: 'Only Chrome extensions may use this bridge.' }));
+      return;
+    }
+    response.setHeader('Access-Control-Allow-Origin', origin || '*');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    response.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+    response.setHeader('Cache-Control', 'no-store');
+
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+
+    const sendJson = (status, value) => {
+      response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify(value));
+    };
+
+    if (request.method === 'GET' && request.url === '/health') {
+      extensionState.lastExtensionActivity = new Date().toISOString();
+      sendJson(200, { ok: true, app: 'Network Watch', port: EXTENSION_BRIDGE_PORT });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/api/state') {
+      sendJson(200, { ok: true, state: extensionStateSnapshot() });
+      return;
+    }
+
+    if (request.method === 'DELETE' && request.url === '/api/state') {
+      extensionState.screenshots = [];
+      extensionState.recordings = [];
+      sendJson(200, { ok: true, state: extensionStateSnapshot() });
+      return;
+    }
+
+    const collection = request.url === '/api/screenshots'
+      ? extensionState.screenshots
+      : request.url === '/api/recordings'
+        ? extensionState.recordings
+        : null;
+    const collectionLimit = request.url === '/api/screenshots' ? 30 : 100;
+
+    if (request.method !== 'POST' || !collection) {
+      sendJson(404, { ok: false, error: 'Not found' });
+      return;
+    }
+
+    let body = '';
+    let tooLarge = false;
+    request.setEncoding('utf8');
+    request.on('data', chunk => {
+      if (tooLarge) return;
+      body += chunk;
+      if (body.length > 20 * 1024 * 1024) {
+        tooLarge = true;
+        sendJson(413, { ok: false, error: 'Payload too large' });
+        request.destroy();
+      }
+    });
+    request.on('end', () => {
+      if (tooLarge) return;
+      try {
+        const value = JSON.parse(body);
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected an object');
+        extensionState.lastExtensionActivity = new Date().toISOString();
+        collection.unshift(value);
+        if (collection.length > collectionLimit) collection.length = collectionLimit;
+        sendJson(201, { ok: true });
+      } catch (error) {
+        sendJson(400, { ok: false, error: `Invalid JSON: ${error.message}` });
+      }
+    });
+  });
+
+  extensionBridge.on('error', error => {
+    console.error(`Extension bridge failed on 127.0.0.1:${EXTENSION_BRIDGE_PORT}:`, error.message);
+  });
+  extensionBridge.listen(EXTENSION_BRIDGE_PORT, '127.0.0.1');
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -35,7 +142,7 @@ function createWindow() {
     {
       label: 'File',
       submenu: [
-        { label: 'Export HAR...', accelerator: 'CmdOrCtrl+E', click: () => mainWindow?.webContents.send('export-har') },
+        { label: 'Export Requests...', accelerator: 'CmdOrCtrl+E', click: () => mainWindow?.webContents.send('export-requests') },
         { type: 'separator' },
         { role: 'quit' },
       ],
@@ -70,7 +177,10 @@ function createWindow() {
   Menu.setApplicationMenu(menu);
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  startExtensionBridge();
+  createWindow();
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
@@ -358,7 +468,7 @@ ipcMain.handle('save-file', async (_event, { defaultPath, content }) => {
   if (!mainWindow) return { ok: false, error: 'No window available' };
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath,
-    filters: [{ name: 'HAR files', extensions: ['har'] }, { name: 'JSON files', extensions: ['json'] }, { name: 'All files', extensions: ['*'] }],
+    filters: [{ name: 'HAR files', extensions: ['har'] }, { name: 'JSON files', extensions: ['json'] }, { name: 'Markdown files', extensions: ['md'] }, { name: 'All files', extensions: ['*'] }],
   });
   if (result.canceled || !result.filePath) return { ok: false, canceled: true };
   try {
@@ -367,6 +477,14 @@ ipcMain.handle('save-file', async (_event, { defaultPath, content }) => {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+});
+
+ipcMain.handle('get-extension-data', async () => ({ ok: true, state: extensionStateSnapshot() }));
+
+ipcMain.handle('clear-extension-data', async () => {
+  extensionState.screenshots = [];
+  extensionState.recordings = [];
+  return { ok: true, state: extensionStateSnapshot() };
 });
 
 ipcMain.handle('detach', async () => {
