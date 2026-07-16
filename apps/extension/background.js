@@ -255,6 +255,15 @@ async function dispatchTrustedClick(tabId, action, frameId, debuggerState) {
   if (frameId) throw new Error('Trusted browser clicks are limited to the main document; using the DOM fallback for this frame.');
   const target = await sendToTab(tabId, { type: 'RESOLVE_REPLAY_TARGET', action }, { frameId: 0 });
   if (!target?.ok) throw new Error(target?.error || 'Could not resolve the click target.');
+  await ensureReplayDebugger(tabId, debuggerState);
+  const coordinates = { x: target.x, y: target.y };
+  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...coordinates });
+  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchMouseEvent', { type: 'mousePressed', ...coordinates, button: 'left', clickCount: 1 });
+  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...coordinates, button: 'left', clickCount: 1 });
+  return target;
+}
+
+async function ensureReplayDebugger(tabId, debuggerState) {
   if (debuggerState.attachError) throw new Error(debuggerState.attachError);
   if (!debuggerState.available) {
     try {
@@ -268,10 +277,45 @@ async function dispatchTrustedClick(tabId, action, frameId, debuggerState) {
       throw error;
     }
   }
-  const coordinates = { x: target.x, y: target.y };
-  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...coordinates });
-  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchMouseEvent', { type: 'mousePressed', ...coordinates, button: 'left', clickCount: 1 });
-  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...coordinates, button: 'left', clickCount: 1 });
+}
+
+const KEY_VIRTUAL_CODES = {
+  Backspace: 8, Tab: 9, Enter: 13, Shift: 16, Control: 17, Alt: 18, Escape: 27,
+  ' ': 32, PageUp: 33, PageDown: 34, End: 35, Home: 36, ArrowLeft: 37,
+  ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Insert: 45, Delete: 46, Meta: 91,
+};
+
+function virtualKeyCode(action) {
+  if (KEY_VIRTUAL_CODES[action.key] !== undefined) return KEY_VIRTUAL_CODES[action.key];
+  if (/^Key[A-Z]$/.test(action.code || '')) return action.code.charCodeAt(3);
+  if (/^Digit[0-9]$/.test(action.code || '')) return action.code.charCodeAt(5);
+  return action.key?.length === 1 ? action.key.toUpperCase().charCodeAt(0) : 0;
+}
+
+async function dispatchTrustedKeypress(tabId, action, frameId, debuggerState) {
+  const target = await sendToTab(tabId, { type: 'FOCUS_REPLAY_TARGET', action }, { frameId: frameId || 0 });
+  if (!target?.ok) throw new Error(target?.error || 'Could not focus the keyboard target.');
+  await ensureReplayDebugger(tabId, debuggerState);
+  const modifiers = (action.altKey ? 1 : 0) | (action.ctrlKey ? 2 : 0) | (action.metaKey ? 4 : 0) | (action.shiftKey ? 8 : 0);
+  const key = action.key || '';
+  const printableText = !action.altKey && !action.ctrlKey && !action.metaKey
+    ? key === 'Enter' ? '\r' : key.length === 1 ? key : ''
+    : '';
+  const keyEvent = {
+    key,
+    code: action.code || key,
+    modifiers,
+    windowsVirtualKeyCode: virtualKeyCode(action),
+    location: Number(action.location) || 0,
+  };
+  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchKeyEvent', {
+    ...keyEvent,
+    type: printableText ? 'keyDown' : 'rawKeyDown',
+    text: printableText,
+    unmodifiedText: printableText,
+    autoRepeat: Boolean(action.repeat),
+  });
+  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchKeyEvent', { ...keyEvent, type: 'keyUp' });
   return target;
 }
 
@@ -373,6 +417,16 @@ async function replayActions(recordingId, suppliedRecording = null, requestedRun
             result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: action.frameId || 0 });
             replayAction.executionMethod = 'dom-click-fallback';
             replayAction.executionWarning = `Trusted click unavailable: ${trustedClickError.message}`;
+          }
+        } else if (replayAction.type === 'keypress') {
+          try {
+            const target = await dispatchTrustedKeypress(tab.id, replayAction, action.frameId || 0, replayDebugger);
+            result = { ok: true, resolutionMethod: target.resolutionMethod };
+            replayAction.executionMethod = 'cdp-trusted-key';
+          } catch (trustedKeyError) {
+            result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: action.frameId || 0 });
+            replayAction.executionMethod = 'dom-key-event-fallback';
+            replayAction.executionWarning = `Trusted key dispatch unavailable: ${trustedKeyError.message}`;
           }
         } else {
           result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: action.frameId || 0 });

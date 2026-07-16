@@ -125,15 +125,48 @@ export type RecordedAction = {
   value?: string;
   key?: string;
   code?: string;
+  location?: number;
+  repeat?: boolean;
+  isComposing?: boolean;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+  form?: { action: string; method: string };
   source?: string;
   locator?: {
     selector?: string;
     tagName?: string;
     id?: string;
+    originalId?: string;
     testId?: string;
     name?: string;
     role?: string;
+    accessibleName?: string;
     ariaLabel?: string;
+    placeholder?: string;
+    alt?: string;
+    title?: string;
+    inputType?: string;
+    autocomplete?: string;
+    label?: string;
+    classList?: string[];
+    ancestorSignature?: string;
+    hierarchyPath?: Array<{
+      tagName: string;
+      nthOfType: number;
+    }>;
+    domHierarchy?: Array<{
+      tagName: string;
+      id?: string;
+      originalId?: string;
+      testId?: string;
+      name?: string;
+      role?: string;
+      ariaLabel?: string;
+      classList: string[];
+      nthOfType: number;
+    }>;
     href?: string;
     text?: string;
   };
@@ -162,7 +195,7 @@ export type RecordedAction = {
   scrollY?: number;
   outcome?: 'success' | 'failed';
   replayError?: string;
-  executionMethod?: 'cdp-trusted-click' | 'dom-click-fallback' | 'scroll' | 'input-value' | 'dom-key-event';
+  executionMethod?: 'cdp-trusted-click' | 'dom-click-fallback' | 'cdp-trusted-key' | 'dom-key-event-fallback' | 'scroll' | 'input-value' | 'dom-key-event';
   executionWarning?: string;
   resolutionMethod?: string;
 };

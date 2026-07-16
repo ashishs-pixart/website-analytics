@@ -8,9 +8,355 @@ function cssEscape(value) {
   return globalThis.CSS?.escape ? CSS.escape(value) : String(value).replace(/[^a-zA-Z0-9_-]/g, character => `\\${character}`);
 }
 
+function isStableId(value) {
+  if (!value || /(?:undefined|null)/i.test(value)) return false;
+  if (/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i.test(value)) return false;
+  if (value.length > 96 || /(?:^|[-_])[0-9a-f]{16,}(?:$|[-_])/i.test(value)) return false;
+  return true;
+}
+
+function normalizedText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+    .replace(/\u00A0/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function canonicalText(value) {
+  return normalizedText(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function generatedIdTextHint(value) {
+  const raw = String(value || '').replace(/^#/, '').replace(/\\/g, '');
+  if (!raw || isStableId(raw)) return '';
+  const withoutRuntimeParts = raw
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi, ' ')
+    .replace(/(?:^|[-_])(undefined|null)(?=$|[-_])/gi, ' ')
+    .replace(/(?:^|[-_])[0-9a-f]{16,}(?=$|[-_])/gi, ' ');
+  const hint = canonicalText(withoutRuntimeParts);
+  return hint.length >= 12 ? hint : '';
+}
+
+function candidateSemanticText(element) {
+  return [
+    element.getAttribute('placeholder'),
+    element.getAttribute('aria-label'),
+    element.getAttribute('title'),
+    element.getAttribute('name'),
+    elementLabel(element),
+    accessibleName(element),
+    element.innerText || element.textContent,
+  ].map(canonicalText).filter(Boolean);
+}
+
+function elementLabel(element) {
+  if (element.getAttribute('aria-labelledby')) {
+    const text = element.getAttribute('aria-labelledby').split(/\s+/)
+      .map(id => document.getElementById(id)?.textContent || '').join(' ');
+    if (normalizedText(text)) return normalizedText(text).slice(0, 300);
+  }
+  if ('labels' in element && element.labels?.length) {
+    return normalizedText(Array.from(element.labels).map(label => label.textContent || '').join(' ')).slice(0, 300);
+  }
+  return normalizedText(element.closest('label')?.textContent).slice(0, 300);
+}
+
+function elementRole(element) {
+  const explicit = element.getAttribute('role');
+  if (explicit) return explicit;
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'a' && element.hasAttribute('href')) return 'link';
+  if (tag === 'button') return 'button';
+  if (tag === 'textarea') return 'textbox';
+  if (tag === 'select') return element.multiple ? 'listbox' : 'combobox';
+  if (/^h[1-6]$/.test(tag)) return 'heading';
+  if (tag === 'img') return 'img';
+  if (tag === 'tr') return 'row';
+  if (tag === 'td') return 'cell';
+  if (tag === 'th') return 'columnheader';
+  if (tag === 'input') {
+    const type = (element.getAttribute('type') || 'text').toLowerCase();
+    if (['button', 'submit', 'reset', 'image'].includes(type)) return 'button';
+    if (type === 'checkbox') return 'checkbox';
+    if (type === 'radio') return 'radio';
+    if (type === 'range') return 'slider';
+    if (type === 'number') return 'spinbutton';
+    if (type === 'search') return 'searchbox';
+    if (!['hidden', 'color', 'date', 'file'].includes(type)) return 'textbox';
+  }
+  return '';
+}
+
+function eventElement(event) {
+  return event.composedPath?.().find(node => node instanceof Element)
+    || (event.target instanceof Element ? event.target : null);
+}
+
+function openRoots() {
+  const roots = [document];
+  for (let index = 0; index < roots.length; index += 1) {
+    for (const element of roots[index].querySelectorAll('*')) {
+      if (element.shadowRoot) roots.push(element.shadowRoot);
+    }
+  }
+  return roots;
+}
+
+function queryAllOpenRoots(selector = '*') {
+  const matches = [];
+  for (const root of openRoots()) {
+    try { matches.push(...root.querySelectorAll(selector)); } catch { /* Ignore an invalid fallback selector. */ }
+  }
+  return matches;
+}
+
+function isVisibleElement(element) {
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+}
+
+function accessibleName(element) {
+  const ariaLabel = normalizedText(element.getAttribute('aria-label'));
+  if (ariaLabel) return ariaLabel.slice(0, 300);
+  const label = elementLabel(element);
+  if (label) return label;
+  const alt = normalizedText(element.getAttribute('alt'));
+  if (alt) return alt.slice(0, 300);
+  if (element instanceof HTMLInputElement && ['button', 'submit', 'reset'].includes(element.type) && element.value) {
+    return normalizedText(element.value).slice(0, 300);
+  }
+  return normalizedText(element.innerText || element.textContent).slice(0, 300);
+}
+
+function nearbyText(element) {
+  return {
+    previousSiblingText: normalizedText(element.previousElementSibling?.innerText || element.previousElementSibling?.textContent).slice(0, 300),
+    nextSiblingText: normalizedText(element.nextElementSibling?.innerText || element.nextElementSibling?.textContent).slice(0, 300),
+    parentText: normalizedText(element.parentElement?.innerText || element.parentElement?.textContent).slice(0, 500),
+  };
+}
+
+function nearestLandmark(element) {
+  const landmark = element.closest('main, nav, aside, header, footer, form, [role="main"], [role="navigation"], [role="complementary"], [role="banner"], [role="contentinfo"], [role="form"], [role="dialog"], [role="alertdialog"], [role="region"]');
+  if (!landmark) return null;
+  return {
+    tagName: landmark.tagName.toLowerCase(),
+    role: elementRole(landmark) || landmark.tagName.toLowerCase(),
+    accessibleName: accessibleName(landmark),
+  };
+}
+
+function nearestHeading(element) {
+  const root = element.getRootNode();
+  const headings = Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]'));
+  const preceding = headings.filter(heading => heading === element || Boolean(heading.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING));
+  const heading = preceding[preceding.length - 1] || null;
+  return heading ? {
+    text: normalizedText(heading.innerText || heading.textContent).slice(0, 300),
+    level: Number(heading.getAttribute('aria-level')) || Number(heading.tagName.slice(1)) || null,
+  } : null;
+}
+
+function formContext(element) {
+  const form = 'form' in element && element.form ? element.form : element.closest('form');
+  if (!form) return null;
+  return {
+    action: form.action || '',
+    method: (form.method || 'get').toLowerCase(),
+    name: form.getAttribute('name') || '',
+    id: isStableId(form.id) ? form.id : '',
+    accessibleName: accessibleName(form),
+  };
+}
+
+function visualFingerprint(element) {
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  return {
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+    fontSize: style.fontSize,
+    color: style.color,
+    backgroundColor: style.backgroundColor,
+    display: style.display,
+  };
+}
+
+function roleIndex(element) {
+  const role = elementRole(element);
+  if (!role) return null;
+  const peers = queryAllOpenRoots('*').filter(candidate => elementRole(candidate) === role && isVisibleElement(candidate));
+  const index = peers.indexOf(element);
+  return index >= 0 ? { role, index: index + 1, total: peers.length } : null;
+}
+
+function xpathForElement(element) {
+  const parts = [];
+  let current = element;
+  while (current && current instanceof Element) {
+    const siblings = current.parentElement
+      ? Array.from(current.parentElement.children).filter(child => child.tagName === current.tagName)
+      : [current];
+    parts.unshift(`${current.tagName.toLowerCase()}[${siblings.indexOf(current) + 1}]`);
+    const root = current.getRootNode();
+    if (!current.parentElement && root instanceof ShadowRoot) return '';
+    if (current === document.documentElement) break;
+    current = current.parentElement;
+  }
+  return `/${parts.join('/')}`;
+}
+
+function elementFromXPath(xpath) {
+  if (!xpath) return null;
+  try {
+    return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+  } catch {
+    return null;
+  }
+}
+
+function frameContext() {
+  const chain = [{ url: location.href, isTop: window === window.top }];
+  let currentWindow = window;
+  try {
+    while (currentWindow !== currentWindow.top && chain.length < 12) {
+      const frame = currentWindow.frameElement;
+      chain.unshift({
+        url: currentWindow.parent.location.href,
+        isTop: currentWindow.parent === currentWindow.top,
+        frameName: frame?.getAttribute('name') || '',
+        frameTitle: frame?.getAttribute('title') || '',
+        hierarchyPath: frame ? hierarchyPath(frame) : [],
+      });
+      currentWindow = currentWindow.parent;
+    }
+  } catch { /* Cross-origin ancestors remain represented by the recorded frame URL and frameId. */ }
+  return chain;
+}
+
+function ancestorSignature(element) {
+  const parts = [];
+  let current = element.parentElement;
+  while (current && current !== document.documentElement && parts.length < 4) {
+    const stableId = isStableId(current.id) ? `#${current.id}` : '';
+    const testId = current.getAttribute('data-testid') || current.getAttribute('data-test') || current.getAttribute('data-cy');
+    const classes = Array.from(current.classList).filter(Boolean).slice(0, 2).join('.');
+    parts.push(`${current.tagName.toLowerCase()}${stableId}${testId ? `[test=${testId}]` : ''}${classes ? `.${classes}` : ''}`);
+    current = current.parentElement;
+  }
+  return parts.join(' < ');
+}
+
+function domHierarchy(element) {
+  const hierarchy = [];
+  let current = element;
+  while (current && current instanceof Element && hierarchy.length < 16) {
+    const siblings = current.parentElement
+      ? Array.from(current.parentElement.children).filter(child => child.tagName === current.tagName)
+      : [];
+    hierarchy.push({
+      tagName: current.tagName.toLowerCase(),
+      id: isStableId(current.id) ? current.id : undefined,
+      originalId: current.id || undefined,
+      testId: current.getAttribute('data-testid') || current.getAttribute('data-test') || current.getAttribute('data-cy') || undefined,
+      name: current.getAttribute('name') || undefined,
+      role: elementRole(current) || undefined,
+      ariaLabel: current.getAttribute('aria-label') || undefined,
+      classList: Array.from(current.classList).filter(Boolean).slice(0, 8),
+      nthOfType: siblings.length > 1 ? siblings.indexOf(current) + 1 : 1,
+    });
+    current = current.parentElement;
+  }
+  return hierarchy;
+}
+
+function hierarchyPath(element) {
+  const path = [];
+  let current = element;
+  while (current && current instanceof Element) {
+    const sameTagSiblings = current.parentElement
+      ? Array.from(current.parentElement.children).filter(child => child.tagName === current.tagName)
+      : [current];
+    path.unshift({ tagName: current.tagName.toLowerCase(), nthOfType: sameTagSiblings.indexOf(current) + 1 });
+    if (current === document.documentElement) break;
+    current = current.parentElement;
+  }
+  return path;
+}
+
+function hierarchyPathText(path) {
+  return (path || []).map(node => `${node.tagName}:nth-of-type(${node.nthOfType})`).join(' > ');
+}
+
+function elementFromHierarchyPath(path) {
+  if (!Array.isArray(path) || !path.length) return null;
+  const [root, ...descendants] = path;
+  let current = document.documentElement;
+  if (!current || root.tagName !== current.tagName.toLowerCase() || root.nthOfType !== 1) return null;
+  for (const node of descendants) {
+    const matches = Array.from(current.children).filter(child => child.tagName.toLowerCase() === node.tagName);
+    current = matches[node.nthOfType - 1];
+    if (!current) return null;
+  }
+  return current;
+}
+
+function rootRelativePath(element, root) {
+  const path = [];
+  let current = element;
+  while (current && current instanceof Element) {
+    const parent = current.parentNode;
+    const siblings = parent?.children
+      ? Array.from(parent.children).filter(child => child.tagName === current.tagName)
+      : [current];
+    path.unshift({ tagName: current.tagName.toLowerCase(), nthOfType: siblings.indexOf(current) + 1 });
+    if (parent === root) break;
+    current = current.parentElement;
+  }
+  return path;
+}
+
+function shadowPathSegments(element) {
+  const segments = [];
+  let current = element;
+  while (current) {
+    const root = current.getRootNode();
+    segments.unshift(rootRelativePath(current, root));
+    if (!(root instanceof ShadowRoot)) break;
+    current = root.host;
+  }
+  return segments;
+}
+
+function elementFromShadowPath(segments) {
+  if (!Array.isArray(segments) || !segments.length) return null;
+  let root = document;
+  let resolved = null;
+  for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+    for (const node of segments[segmentIndex]) {
+      const matches = Array.from(root.children || []).filter(child => child.tagName.toLowerCase() === node.tagName);
+      resolved = matches[node.nthOfType - 1];
+      if (!resolved) return null;
+      root = resolved;
+    }
+    if (segmentIndex < segments.length - 1) {
+      if (!resolved?.shadowRoot) return null;
+      root = resolved.shadowRoot;
+    }
+  }
+  return resolved;
+}
+
 function uniqueSelector(element) {
   if (!(element instanceof Element)) return '';
-  if (element.id) return `#${cssEscape(element.id)}`;
+  if (isStableId(element.id)) return `#${cssEscape(element.id)}`;
 
   for (const attribute of ['data-testid', 'data-test', 'data-cy', 'name']) {
     const value = element.getAttribute(attribute);
@@ -43,14 +389,50 @@ function actionableTarget(target) {
 }
 
 function elementLocator(element) {
+  const path = hierarchyPath(element);
+  const siblingContext = nearbyText(element);
+  const landmark = nearestLandmark(element);
+  const heading = nearestHeading(element);
+  const form = formContext(element);
   return {
-    selector: uniqueSelector(element),
+    selector: hierarchyPathText(path),
+    hierarchyPath: path,
+    shadowPath: shadowPathSegments(element),
     tagName: element.tagName.toLowerCase(),
-    id: element.id || undefined,
+    id: isStableId(element.id) ? element.id : undefined,
+    originalId: element.id || undefined,
     testId: element.getAttribute('data-testid') || element.getAttribute('data-test') || element.getAttribute('data-cy') || undefined,
     name: element.getAttribute('name') || undefined,
-    role: element.getAttribute('role') || undefined,
+    role: elementRole(element) || undefined,
+    accessibleName: accessibleName(element) || undefined,
     ariaLabel: element.getAttribute('aria-label') || undefined,
+    placeholder: element.getAttribute('placeholder') || undefined,
+    alt: element.getAttribute('alt') || undefined,
+    title: element.getAttribute('title') || undefined,
+    inputType: element.getAttribute('type') || undefined,
+    autocomplete: element.getAttribute('autocomplete') || undefined,
+    label: elementLabel(element) || undefined,
+    classList: Array.from(element.classList).filter(Boolean).slice(0, 12),
+    ancestorSignature: ancestorSignature(element),
+    domHierarchy: domHierarchy(element),
+    previousSiblingText: siblingContext.previousSiblingText,
+    nextSiblingText: siblingContext.nextSiblingText,
+    parentText: siblingContext.parentText,
+    roleIndex: roleIndex(element),
+    landmark,
+    heading,
+    form,
+    visualFingerprint: visualFingerprint(element),
+    xpath: xpathForElement(element),
+    frameChain: frameContext(),
+    semanticFingerprint: {
+      role: elementRole(element) || undefined,
+      name: accessibleName(element) || undefined,
+      heading: heading?.text || undefined,
+      form: form?.name || form?.accessibleName || form?.action || undefined,
+      parent: siblingContext.parentText || undefined,
+      landmark: landmark?.role || undefined,
+    },
     href: element instanceof HTMLAnchorElement ? element.href : undefined,
     text: (element.innerText || element.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 300),
   };
@@ -59,11 +441,19 @@ function elementLocator(element) {
 function sendRecordedAction(type, element, extra = {}) {
   if (!recording || !element) return Promise.resolve({ ok: false });
   const now = Date.now();
+  const rect = element.getBoundingClientRect();
+  const position = rect.width > 0 && rect.height > 0 ? {
+    clientX: rect.left + rect.width / 2,
+    clientY: rect.top + rect.height / 2,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+  } : {};
+  const locator = elementLocator(element);
   const action = {
     id: `ACT-${crypto.randomUUID()}`,
     type,
-    selector: uniqueSelector(element),
-    locator: elementLocator(element),
+    selector: locator.selector,
+    locator,
     timestamp: now,
     delayMs: now - lastActionAt,
     tagName: element.tagName.toLowerCase(),
@@ -72,6 +462,7 @@ function sendRecordedAction(type, element, extra = {}) {
     startUrl: location.href,
     frameUrl: location.href,
     pageUrl: location.href,
+    ...position,
     ...extra,
   };
   lastActionAt = now;
@@ -116,7 +507,7 @@ function scheduleInput(element, inputType = '') {
 }
 
 document.addEventListener('click', event => {
-  const target = event.target instanceof Element ? event.target : null;
+  const target = eventElement(event);
   const element = actionableTarget(target) || target;
   if (element) sendRecordedAction('click', element, {
     clientX: event.clientX,
@@ -139,7 +530,7 @@ window.addEventListener('scroll', () => {
 }, true);
 
 document.addEventListener('change', event => {
-  const element = event.target;
+  const element = eventElement(event);
   if (!(element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement)) return;
   if (element instanceof HTMLInputElement && element.type === 'password') return;
   if (element instanceof HTMLInputElement && !['checkbox', 'radio', 'color', 'date', 'range'].includes(element.type)) return;
@@ -148,7 +539,7 @@ document.addEventListener('change', event => {
 }, true);
 
 document.addEventListener('keydown', event => {
-  const element = actionableTarget(event.target);
+  const element = actionableTarget(eventElement(event));
   if (!element || ['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) return;
   if (element instanceof HTMLInputElement && element.type === 'password') return;
   if (isTextEntry(element)) {
@@ -157,7 +548,9 @@ document.addEventListener('keydown', event => {
     flushPendingInput(element);
     sendRecordedAction('keypress', element, {
       key: 'Enter', code: event.code.slice(0, 80),
+      location: event.location, repeat: event.repeat, isComposing: event.isComposing,
       altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey,
+      form: element.form ? { action: element.form.action, method: element.form.method } : undefined,
     });
     return;
   }
@@ -165,10 +558,14 @@ document.addEventListener('keydown', event => {
   sendRecordedAction('keypress', element, {
     key: event.key.slice(0, 80),
     code: event.code.slice(0, 80),
+    location: event.location,
+    repeat: event.repeat,
+    isComposing: event.isComposing,
     altKey: event.altKey,
     ctrlKey: event.ctrlKey,
     metaKey: event.metaKey,
     shiftKey: event.shiftKey,
+    form: 'form' in element && element.form ? { action: element.form.action, method: element.form.method } : undefined,
   });
 }, true);
 
@@ -188,7 +585,7 @@ document.addEventListener('submit', event => {
 }, true);
 
 document.addEventListener('input', event => {
-  const element = event.target;
+  const element = eventElement(event);
   if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return;
   if (element instanceof HTMLInputElement && element.type === 'password') return;
   if (!isTextEntry(element)) return;
@@ -196,7 +593,8 @@ document.addEventListener('input', event => {
 }, true);
 
 document.addEventListener('blur', event => {
-  if (isTextEntry(event.target)) flushPendingInput(event.target);
+  const element = eventElement(event);
+  if (isTextEntry(element)) flushPendingInput(element);
 }, true);
 
 function matchingCssRules(element) {
@@ -352,50 +750,213 @@ async function applyInputAction(element, action) {
 }
 
 function findReplayElement(action) {
-  try {
-    const selected = document.querySelector(action.selector);
-    if (selected) return { element: selected, method: 'css-selector' };
-  } catch { /* Try the recorded locator bundle. */ }
-
   const locator = action.locator || {};
-  const candidates = Array.from(document.querySelectorAll(locator.tagName || action.tagName || '*'));
-  const exactMatches = [
-    ['id', locator.id],
-    ['data-testid', locator.testId],
-    ['data-test', locator.testId],
-    ['data-cy', locator.testId],
-    ['name', locator.name],
-    ['aria-label', locator.ariaLabel],
-    ['role', locator.role],
-  ];
-  for (const [attribute, value] of exactMatches) {
-    if (!value) continue;
-    const match = candidates.find(candidate => candidate.getAttribute(attribute) === value);
-    if (match) return { element: match, method: `attribute:${attribute}` };
+  const expectedTag = locator.tagName || action.tagName || '*';
+  const candidates = queryAllOpenRoots(expectedTag);
+  const uniqueMatch = predicate => {
+    const matches = candidates.filter(predicate);
+    return matches.length === 1 ? matches[0] : null;
+  };
+
+  // Follow Playwright's resilient locator order: user-facing semantics, then explicit test contracts.
+  if (locator.role && locator.accessibleName) {
+    const match = uniqueMatch(candidate => elementRole(candidate) === locator.role && accessibleName(candidate) === locator.accessibleName);
+    if (match) return { element: match, method: 'role-and-accessible-name' };
+  }
+  if (locator.ariaLabel) {
+    const match = uniqueMatch(candidate => candidate.getAttribute('aria-label') === locator.ariaLabel);
+    if (match) return { element: match, method: 'aria-label' };
+  }
+  if (locator.label) {
+    const match = uniqueMatch(candidate => elementLabel(candidate) === locator.label);
+    if (match) return { element: match, method: 'label' };
+  }
+  if (locator.placeholder) {
+    const expected = canonicalText(locator.placeholder);
+    const match = uniqueMatch(candidate => canonicalText(candidate.getAttribute('placeholder')) === expected);
+    if (match) return { element: match, method: 'placeholder' };
+  }
+  if (locator.alt) {
+    const match = uniqueMatch(candidate => candidate.getAttribute('alt') === locator.alt);
+    if (match) return { element: match, method: 'alt-text' };
+  }
+  if (locator.title) {
+    const match = uniqueMatch(candidate => candidate.getAttribute('title') === locator.title);
+    if (match) return { element: match, method: 'title' };
+  }
+  if (locator.testId) {
+    const match = uniqueMatch(candidate => ['data-testid', 'data-test', 'data-cy'].some(attribute => candidate.getAttribute(attribute) === locator.testId));
+    if (match) return { element: match, method: 'test-id' };
+  }
+  if (isStableId(locator.id)) {
+    const match = uniqueMatch(candidate => candidate.id === locator.id);
+    if (match) return { element: match, method: 'stable-id' };
+  }
+  if (locator.name) {
+    const match = uniqueMatch(candidate => candidate.getAttribute('name') === locator.name);
+    if (match) return { element: match, method: 'name' };
   }
   if (locator.href) {
-    const match = candidates.find(candidate => candidate instanceof HTMLAnchorElement && candidate.href === locator.href);
+    const match = uniqueMatch(candidate => candidate instanceof HTMLAnchorElement && candidate.href === locator.href);
     if (match) return { element: match, method: 'href' };
   }
-  const expectedText = (locator.text || action.text || '').trim().replace(/\s+/g, ' ');
+  const expectedText = normalizedText(locator.text || action.text);
   if (expectedText) {
-    const match = candidates.find(candidate => (candidate.innerText || candidate.textContent || '').trim().replace(/\s+/g, ' ') === expectedText);
+    const match = uniqueMatch(candidate => normalizedText(candidate.innerText || candidate.textContent) === expectedText);
     if (match) return { element: match, method: 'exact-text' };
   }
+
+  const generatedIdHint = generatedIdTextHint(locator.originalId || locator.id || action.selector);
+  if (generatedIdHint) {
+    const match = uniqueMatch(candidate => candidateSemanticText(candidate).includes(generatedIdHint));
+    if (match) return { element: match, method: 'generated-id-text-hint' };
+  }
+  const canonicalExpectedText = canonicalText(expectedText);
+  if (canonicalExpectedText.length >= 3) {
+    const match = uniqueMatch(candidate => canonicalText(candidate.innerText || candidate.textContent) === canonicalExpectedText);
+    if (match) return { element: match, method: 'normalized-text' };
+  }
+
+  // CSS is deliberately below user-facing locators because DOM structure and generated IDs are brittle.
+  try {
+    const matches = queryAllOpenRoots(action.selector);
+    if (matches.length === 1) return { element: matches[0], method: 'css-selector' };
+  } catch { /* Continue with similarity and coordinate fallbacks. */ }
+
+  const expectedClasses = new Set(locator.classList || []);
+  const rolePeers = locator.roleIndex?.role
+    ? queryAllOpenRoots('*').filter(candidate => elementRole(candidate) === locator.roleIndex.role && isVisibleElement(candidate))
+    : [];
+  const scored = candidates.map((candidate, index) => {
+    let score = 0;
+    if (locator.role && elementRole(candidate) === locator.role) score += 40;
+    if (locator.accessibleName && accessibleName(candidate) === locator.accessibleName) score += 100;
+    if (locator.ariaLabel && candidate.getAttribute('aria-label') === locator.ariaLabel) score += 80;
+    if (locator.placeholder && canonicalText(candidate.getAttribute('placeholder')) === canonicalText(locator.placeholder)) score += 50;
+    if (locator.title && candidate.getAttribute('title') === locator.title) score += 25;
+    if (locator.inputType && candidate.getAttribute('type') === locator.inputType) score += 10;
+    if (locator.autocomplete && candidate.getAttribute('autocomplete') === locator.autocomplete) score += 8;
+    if (locator.label && elementLabel(candidate) === locator.label) score += 70;
+    if (expectedText && normalizedText(candidate.innerText || candidate.textContent) === expectedText) score += 40;
+    const context = nearbyText(candidate);
+    if (locator.previousSiblingText && context.previousSiblingText === locator.previousSiblingText) score += 20;
+    if (locator.nextSiblingText && context.nextSiblingText === locator.nextSiblingText) score += 20;
+    if (locator.parentText && context.parentText === locator.parentText) score += 30;
+    const landmark = nearestLandmark(candidate);
+    if (locator.landmark?.role && landmark?.role === locator.landmark.role) score += 20;
+    if (locator.landmark?.accessibleName && landmark?.accessibleName === locator.landmark.accessibleName) score += 25;
+    const heading = nearestHeading(candidate);
+    if (locator.heading?.text && heading?.text === locator.heading.text) score += 35;
+    const form = formContext(candidate);
+    if (locator.form?.action && form?.action === locator.form.action) score += 25;
+    if (locator.form?.name && form?.name === locator.form.name) score += 25;
+    const classMatches = Array.from(expectedClasses).filter(className => candidate.classList.contains(className)).length;
+    score += Math.min(15, classMatches * 3);
+    if (locator.ancestorSignature && ancestorSignature(candidate) === locator.ancestorSignature) score += 25;
+    if (locator.roleIndex?.index && rolePeers.indexOf(candidate) + 1 === locator.roleIndex.index) score += 10;
+    if (locator.visualFingerprint) {
+      const visual = visualFingerprint(candidate);
+      const expectedVisual = locator.visualFingerprint;
+      if (Math.abs(visual.width - expectedVisual.width) <= 4) score += 5;
+      if (Math.abs(visual.height - expectedVisual.height) <= 4) score += 5;
+      if (visual.fontSize === expectedVisual.fontSize) score += 4;
+      if (visual.color === expectedVisual.color) score += 3;
+      if (visual.backgroundColor === expectedVisual.backgroundColor) score += 3;
+    }
+    if (locator.domHierarchy?.length) {
+      const candidateHierarchy = domHierarchy(candidate);
+      let hierarchyScore = 0;
+      for (let depth = 0; depth < Math.min(locator.domHierarchy.length, candidateHierarchy.length); depth += 1) {
+        const expected = locator.domHierarchy[depth];
+        const actual = candidateHierarchy[depth];
+        if (expected.tagName !== actual.tagName) break;
+        hierarchyScore += 5;
+        if (expected.id && expected.id === actual.id) hierarchyScore += 16;
+        if (expected.testId && expected.testId === actual.testId) hierarchyScore += 16;
+        if (expected.role && expected.role === actual.role) hierarchyScore += 4;
+        if (expected.nthOfType === actual.nthOfType) hierarchyScore += 3;
+        const expectedNodeClasses = new Set(expected.classList || []);
+        hierarchyScore += Math.min(6, actual.classList.filter(className => expectedNodeClasses.has(className)).length * 2);
+      }
+      score += Math.min(70, hierarchyScore);
+    }
+    return { candidate, score, index };
+  }).sort((a, b) => b.score - a.score || a.index - b.index);
+  if (scored[0]?.score >= 40 && scored[0].score >= (scored[1]?.score || 0) + 10) {
+    return { element: scored[0].candidate, method: `semantic-fingerprint:${scored[0].score}` };
+  }
+  const hierarchyElement = elementFromHierarchyPath(locator.hierarchyPath);
+  if (hierarchyElement) return { element: hierarchyElement, method: 'html-hierarchy-fallback' };
+  const shadowElement = elementFromShadowPath(locator.shadowPath);
+  if (shadowElement) return { element: shadowElement, method: 'shadow-hierarchy-fallback' };
+  const xpathElement = elementFromXPath(locator.xpath);
+  if (xpathElement instanceof Element) return { element: xpathElement, method: 'xpath-fallback' };
   return { element: null, method: '' };
 }
 
+function findReplayElementByHierarchy(action) {
+  const path = action.locator?.hierarchyPath;
+  const element = elementFromHierarchyPath(path);
+  return element
+    ? { element, method: 'exact-html-hierarchy' }
+    : { element: null, method: Array.isArray(path) ? 'html-hierarchy-not-found' : 'html-hierarchy-not-recorded' };
+}
+
+async function findReplayElementWithRetry(action, timeoutMs = 1800) {
+  const deadline = Date.now() + timeoutMs;
+  let result = findReplayElement(action);
+  while (!result.element && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 120));
+    result = findReplayElement(action);
+  }
+  return result;
+}
+
+function recordedCoordinateTarget(action) {
+  if (!Number.isFinite(action.clientX) || !Number.isFinite(action.clientY)) return null;
+  const x = action.viewportWidth ? action.clientX * window.innerWidth / action.viewportWidth : action.clientX;
+  const y = action.viewportHeight ? action.clientY * window.innerHeight / action.viewportHeight : action.clientY;
+  let element = document.elementFromPoint(x, y);
+  while (element?.shadowRoot) element = element.shadowRoot.elementFromPoint(x, y) || element;
+  const expectedTag = action.locator?.tagName || action.tagName;
+  if (element && expectedTag && element.tagName.toLowerCase() !== expectedTag) element = element.closest(expectedTag);
+  return element ? { element, x, y } : null;
+}
+
+async function focusReplayTarget(action) {
+  let { element, method } = await findReplayElementWithRetry(action);
+  const activeElement = document.activeElement;
+  const expectedTag = action.locator?.tagName || action.tagName;
+  if (!element && activeElement instanceof Element && activeElement !== document.body
+      && (!expectedTag || activeElement.tagName.toLowerCase() === expectedTag)) {
+    element = activeElement;
+    method = 'active-element-fallback';
+  }
+  if (!element) {
+    element = recordedCoordinateTarget(action)?.element;
+    if (element) method = 'recorded-coordinates-fallback';
+  }
+  if (!element) return { ok: false, error: `Could not resolve the recorded keyboard target: ${action.selector}` };
+  element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+  element.focus({ preventScroll: true });
+  if (document.activeElement !== element && !element.contains(document.activeElement)) {
+    return { ok: false, error: `Element could not receive keyboard focus: ${action.selector}` };
+  }
+  return { ok: true, selector: action.selector, resolutionMethod: method };
+}
+
 async function resolveReplayTarget(action) {
-  let { element, method } = findReplayElement(action);
+  let { element, method } = await findReplayElementWithRetry(action);
   let x;
   let y;
-  if (!element && Number.isFinite(action.clientX) && Number.isFinite(action.clientY)) {
-    x = action.viewportWidth ? action.clientX * window.innerWidth / action.viewportWidth : action.clientX;
-    y = action.viewportHeight ? action.clientY * window.innerHeight / action.viewportHeight : action.clientY;
-    element = document.elementFromPoint(x, y);
-    method = 'recorded-coordinates';
+  if (!element) {
+    const coordinateTarget = recordedCoordinateTarget(action);
+    element = coordinateTarget?.element;
+    x = coordinateTarget?.x;
+    y = coordinateTarget?.y;
+    if (element) method = 'recorded-coordinates-fallback';
   }
-  if (!element) return { ok: false, error: `Element not found and no coordinate fallback was available: ${action.selector}` };
+  if (!element) return { ok: false, error: `Could not resolve the recorded target: ${action.selector}` };
   element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
   await new Promise(resolve => requestAnimationFrame(resolve));
   const rect = element.getBoundingClientRect();
@@ -404,21 +965,27 @@ async function resolveReplayTarget(action) {
     y = Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2));
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false, error: `The replay target is not visible: ${action.selector}` };
-  return { ok: true, x, y, selector: uniqueSelector(element), resolutionMethod: method };
+  return { ok: true, x, y, selector: action.selector, resolutionMethod: method };
 }
 
-function replayAction(action) {
-  let { element, method: resolutionMethod } = findReplayElement(action);
+async function replayAction(action) {
   if (action.type === 'scroll') {
     window.scrollTo({ left: action.scrollX || 0, top: action.scrollY || 0, behavior: 'instant' });
     return { ok: true, fallback: 'coordinates' };
   }
-  if (!element && Number.isFinite(action.clientX) && Number.isFinite(action.clientY)) {
-    const x = action.viewportWidth ? action.clientX * window.innerWidth / action.viewportWidth : action.clientX;
-    const y = action.viewportHeight ? action.clientY * window.innerHeight / action.viewportHeight : action.clientY;
-    element = document.elementFromPoint(x, y);
+  let { element, method: resolutionMethod } = await findReplayElementWithRetry(action);
+  const activeElement = document.activeElement;
+  const expectedTag = action.locator?.tagName || action.tagName;
+  if (!element && action.type !== 'click' && activeElement instanceof Element && activeElement !== document.body
+      && (!expectedTag || activeElement.tagName.toLowerCase() === expectedTag)) {
+    element = activeElement;
+    resolutionMethod = 'active-element-fallback';
   }
-  if (!element) return { ok: false, error: `Element not found and no coordinate fallback was available: ${action.selector}` };
+  if (!element) {
+    element = recordedCoordinateTarget(action)?.element;
+    if (element) resolutionMethod = 'recorded-coordinates-fallback';
+  }
+  if (!element) return { ok: false, error: `Could not resolve the recorded target: ${action.selector}` };
   element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
   if (action.type === 'click') {
     element.click();
@@ -434,7 +1001,8 @@ function replayAction(action) {
     }));
     if (action.key === 'Enter' && element.form) element.form.requestSubmit();
   } else if ('value' in element) {
-    return applyInputAction(element, action);
+    const inputResult = await applyInputAction(element, action);
+    return { ...inputResult, resolutionMethod };
   }
   return { ok: true, resolutionMethod };
 }
@@ -537,6 +1105,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   } else if (message.type === 'RESOLVE_REPLAY_TARGET') {
     resolveReplayTarget(message.action).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  } else if (message.type === 'FOCUS_REPLAY_TARGET') {
+    focusReplayTarget(message.action).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   } else if (message.type === 'REFRESH_SELECTED_ELEMENTS') {
     const elements = (message.selectors || []).map(selector => {
