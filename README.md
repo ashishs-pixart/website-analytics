@@ -35,7 +35,7 @@ pnpm install
 pnpm start
 ```
 
-This builds the React interface and opens the Network Watch desktop app. It also starts the local extension/MCP bridge on `127.0.0.1:9231`.
+This builds the React interface and opens the Network Watch desktop app. It also starts the private extension/data bridge on `127.0.0.1:9231`. Port 9231 is not an MCP transport; VS Code or Copilot CLI separately starts the stdio MCP adapter configured in this repository.
 
 You can use `npm install` and `npm start` instead if you prefer npm, but use one package manager consistently for the workspace.
 
@@ -107,7 +107,7 @@ For a manual extension-only check, select the recording in the popup and click *
 
 ### 5. Verify the local MCP server
 
-The MCP server is launched automatically by VS Code or Copilot CLI through `stdio`; you normally do not start it in a sefiparate terminal. To inspect it manually:
+The MCP stdio adapter is launched automatically by VS Code or Copilot CLI from the repository configuration; you normally do not start it in a separate terminal. The Network Watch desktop app must already be running because the adapter calls its bridge. To inspect the adapter manually:
 
 ```bash
 pnpm run mcp:stdio
@@ -216,6 +216,8 @@ Copilot CLI reads the checked-in [`.mcp.json`](.mcp.json); VS Code reads [`.vsco
 
 See [`mcp-setup.md`](mcp-setup.md) for contracts, comparison semantics, security controls, and current setup references.
 
+See [`docs/deployment-and-architecture.md`](docs/deployment-and-architecture.md) for Docker Compose, GitHub Actions, the exact MCP/Copilot process chain, and the recommended multi-application directory split.
+
 ## Notes
 
 - Response bodies are loaded on demand. Some bodies may not be available after cache/service-worker redirects or if the browser has discarded them.
@@ -232,6 +234,7 @@ src/preload.js    Safe IPC API exposed to the renderer
 src/network-watch-store.js Durable recording, request evidence, replay, comparison, and export service
 src/renderer      React + TypeScript renderer app
 mcp               MCP server, stdio entry point, and Streamable HTTP entry point
+docs              Deployment and architecture guidance
 src/style.css     Shared dark developer-tool UI styles
 dist/renderer     Generated renderer build loaded by Electron
 ```

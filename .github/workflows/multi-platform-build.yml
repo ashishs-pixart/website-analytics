@@ -1,35 +1,77 @@
-name: Multi-Platform Electron Build
+name: Validate and package Network Watch
 
 on:
+  pull_request:
+    branches: ["main", "master"]
   push:
-    branches: ["master"]
+    branches: ["main", "master"]
+    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish the packaged artifacts as a GitHub release"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    name: Build for ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
+  quality:
+    name: Typecheck, test, renderer, and container
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm exec tsc --noEmit
+
+      - name: Test store and MCP contracts
+        run: pnpm run test:mcp
+
+      - name: Build renderer
+        run: pnpm run build:renderer
+
+      - name: Validate Docker image
+        run: docker build --tag network-watch:ci .
+
+  package:
+    name: Package for ${{ matrix.platform }}
+    needs: quality
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             platform: linux
-            artifact_name: network-inspector-linux
+            artifact_name: network-watch-linux
             build_args: --linux AppImage
-
           - os: windows-latest
             platform: windows
-            artifact_name: network-inspector-windows
+            artifact_name: network-watch-windows
             build_args: --win nsis
-
           - os: macos-latest
             platform: macos
-            artifact_name: network-inspector-macos
+            artifact_name: network-watch-macos
             build_args: --mac dmg zip
 
     steps:
@@ -39,20 +81,17 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.16.1
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Type check
-        run: pnpm exec tsc --noEmit
 
       - name: Build renderer
         run: pnpm run build:renderer
@@ -80,12 +119,15 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: release-artifacts/*
           if-no-files-found: error
+          retention-days: 14
 
   publish:
-    name: Create GitHub Release
-    needs: build
+    name: Publish GitHub release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -93,17 +135,21 @@ jobs:
           path: release-artifacts
           merge-multiple: true
 
-      - name: Generate release tag
+      - name: Choose release tag
         id: tag
+        shell: bash
         run: |
-          TAG_NAME="build-$(date +'%Y%m%d-%H%M%S')"
-          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=build-$(date +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Create GitHub Release
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: Network Inspector ${{ steps.tag.outputs.tag }}
+          name: Network Watch ${{ steps.tag.outputs.tag }}
           files: release-artifacts/*
           generate_release_notes: true
           draft: false

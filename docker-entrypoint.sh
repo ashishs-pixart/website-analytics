@@ -15,4 +15,4 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-dbus-run-session -- npm start -- --no-sandbox --disable-gpu --disable-dev-shm-usage
+dbus-run-session -- pnpm start -- --no-sandbox --disable-gpu --disable-dev-shm-usage

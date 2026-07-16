@@ -4,6 +4,8 @@
 
 This document records the implemented MCP architecture and the remaining rollout work. The local `stdio` server, Streamable HTTP entry point, recording/replay tools, deterministic comparison, direct export responses, VS Code configuration, and Copilot CLI workspace configuration are now implemented.
 
+Starting the Electron desktop app starts the data bridge on port 9231, not an MCP transport. VS Code or Copilot CLI reads its workspace configuration and spawns `mcp/stdio.mjs`; `mcp/http.mjs` must be started separately when Streamable HTTP is wanted. Both MCP entry points are adapters over the running Electron bridge and do not contain the durable recording state themselves. See [`docs/deployment-and-architecture.md`](docs/deployment-and-architecture.md) for the full process and deployment model.
+
 The goal is to let an LLM:
 
 1. discover the number of saved recordings and their stable IDs;

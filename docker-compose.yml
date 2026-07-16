@@ -11,6 +11,38 @@ services:
       NO_AT_BRIDGE: "1"
       NOVNC_PORT: "6080"
       VNC_PORT: "5900"
+      NETWORK_WATCH_BRIDGE_HOST: "0.0.0.0"
+      XDG_CONFIG_HOME: "/data/config"
     ports:
-      - "6080:6080"
-      - "5900:5900"
+      - "127.0.0.1:6080:6080"
+      - "127.0.0.1:5900:5900"
+      - "127.0.0.1:9231:9231"
+      - "127.0.0.1:9232:9232"
+    volumes:
+      - network-watch-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9231/api/state').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  network-watch-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: network-inspector
+    profiles: ["mcp"]
+    network_mode: "service:network-inspector"
+    depends_on:
+      network-inspector:
+        condition: service_healthy
+    environment:
+      NETWORK_WATCH_URL: "http://127.0.0.1:9231"
+      NETWORK_WATCH_MCP_HOST: "0.0.0.0"
+      NETWORK_WATCH_MCP_PORT: "9232"
+      NETWORK_WATCH_MCP_TOKEN: "${NETWORK_WATCH_MCP_TOKEN:-network-watch-local}"
+    command: ["pnpm", "run", "mcp:http"]
+
+volumes:
+  network-watch-data:

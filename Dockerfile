@@ -5,6 +5,7 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       ca-certificates \
+      chromium \
       dbus-x11 \
       fluxbox \
       novnc \
@@ -30,8 +31,10 @@ RUN apt-get update \
       libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
-RUN npm install
+RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY . .
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -43,6 +46,6 @@ ENV NO_AT_BRIDGE=1
 ENV NOVNC_PORT=6080
 ENV VNC_PORT=5900
 
-EXPOSE 6080 5900
+EXPOSE 6080 5900 9231 9232
 
 CMD ["docker-entrypoint.sh"]

@@ -13,6 +13,7 @@ let extensionBridge = null;
 let networkWatchStore = null;
 let copilotProcess = null;
 const EXTENSION_BRIDGE_PORT = 9231;
+const EXTENSION_BRIDGE_HOST = process.env.NETWORK_WATCH_BRIDGE_HOST || '127.0.0.1';
 const extensionState = {
   screenshots: [],
   recordings: [],
@@ -199,9 +200,9 @@ function startExtensionBridge() {
   });
 
   extensionBridge.on('error', error => {
-    console.error(`Extension bridge failed on 127.0.0.1:${EXTENSION_BRIDGE_PORT}:`, error.message);
+    console.error(`Extension bridge failed on ${EXTENSION_BRIDGE_HOST}:${EXTENSION_BRIDGE_PORT}:`, error.message);
   });
-  extensionBridge.listen(EXTENSION_BRIDGE_PORT, '127.0.0.1');
+  extensionBridge.listen(EXTENSION_BRIDGE_PORT, EXTENSION_BRIDGE_HOST);
 }
 
 function createWindow() {
@@ -401,6 +402,9 @@ ipcMain.handle('start-browser-debug', async (_event, { port = 9222 } = {}) => {
     `--user-data-dir=${profileDir}`,
     'about:blank',
   ];
+  if (process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
+    args.unshift('--disable-dev-shm-usage', '--no-sandbox');
+  }
 
   try {
     const child = spawn(browser.executablePath, args, {
