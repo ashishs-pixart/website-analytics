@@ -4,7 +4,3 @@ packages:
 allowBuilds:
   electron: true
   esbuild: true
-
-ignoredBuiltDependencies:
-  - electron
-  - esbuild

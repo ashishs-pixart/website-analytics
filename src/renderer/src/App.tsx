@@ -4,6 +4,7 @@ import { ExportModal, type ExportFormat } from './components/ExportModal';
 import { HelpModal } from './components/HelpModal';
 import { InspectDashboard } from './components/InspectDashboard';
 import { InspectExportModal } from './components/InspectExportModal';
+import { CopilotTerminal } from './components/CopilotTerminal';
 import { ModeBar, type AppMode } from './components/ModeBar';
 import { RequestDetails } from './components/RequestDetails';
 import { RequestTable } from './components/RequestTable';
@@ -49,6 +50,7 @@ export function App() {
   const [showInspectExport, setShowInspectExport] = useState(false);
   const [includeMeaningfulRequests, setIncludeMeaningfulRequests] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [copilotSession, setCopilotSession] = useState<{ directory: string; output: string; running: boolean } | null>(null);
   const [extensionState, setExtensionState] = useState<ExtensionState>(EMPTY_EXTENSION_STATE);
   const [screenshotFeedback, setScreenshotFeedback] = useState<Record<string, string>>({});
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
@@ -220,6 +222,7 @@ export function App() {
     const eventCount = scope.events ? extensionState.recordings.reduce((total, recording) => total + recording.actions.length, 0) : 0;
     if (!reviewed.length && !eventCount) return;
     setExporting(true);
+    setCopilotSession({ directory: 'Select a code directory…', output: '', running: true });
     try {
       const result = await window.cdp.saveFile({
         defaultPath: `website-improvements-${new Date().toISOString().replace(/[:.]/g, '-')}.md`,
@@ -235,6 +238,45 @@ export function App() {
       setExporting(false);
     }
   }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, screenshotFeedback, showToast]);
+
+  const sendInspectPromptToCopilot = useCallback(async (scope: { breakpoints: boolean; events: boolean }) => {
+    const reviewed = scope.breakpoints ? extensionState.screenshots.filter((screenshot) => {
+      const elements = screenshot.elements?.length ? screenshot.elements : screenshot.element ? [screenshot.element] : [];
+      return screenshotFeedback[screenshot.id]?.trim() || elements.some((_element, index) => elementFeedback[elementFeedbackId(screenshot.id, index)]?.trim());
+    }) : [];
+    const eventCount = scope.events ? extensionState.recordings.reduce((total, recording) => total + recording.actions.length, 0) : 0;
+    if (!reviewed.length && !eventCount) return;
+    setExporting(true);
+    try {
+      const prompt = makeInspectPrompt(reviewed, screenshotFeedback, extensionState.recordings, actionFeedback, allRequests, includeMeaningfulRequests, elementFeedback, scope);
+      const result = await window.cdp.startCopilot({ prompt });
+      if (result.ok) {
+        setShowInspectExport(false);
+        setCopilotSession(current => ({ directory: result.directory, output: current?.output || '', running: current?.running ?? true }));
+      } else if (!result.canceled) {
+        setCopilotSession(null);
+        showToast(result.error || 'Could not start Copilot');
+      } else {
+        setCopilotSession(null);
+      }
+    } finally {
+      setExporting(false);
+    }
+  }, [actionFeedback, allRequests, elementFeedback, extensionState.recordings, extensionState.screenshots, includeMeaningfulRequests, screenshotFeedback, showToast]);
+
+  useEffect(() => window.cdp.onCopilotEvent((event) => {
+    if (event.kind === 'output') {
+      setCopilotSession(current => current ? { ...current, output: current.output + event.text } : current);
+    } else if (event.kind === 'error') {
+      setCopilotSession(current => current ? { ...current, output: `${current.output}\nError: ${event.error}\n`, running: false } : current);
+    } else {
+      setCopilotSession(current => current ? {
+        ...current,
+        output: `${current.output}\nCopilot exited${event.code == null ? '' : ` with code ${event.code}`}.${event.signal ? ` Signal: ${event.signal}.` : ''}\n`,
+        running: false,
+      } : current);
+    }
+  }), []);
 
   const openModeExport = useCallback(() => {
     if (mode === 'inspect') setShowInspectExport(true);
@@ -383,6 +425,14 @@ export function App() {
           onElementFeedbackChange={changeElementFeedback}
           onClose={() => setShowInspectExport(false)}
           onExport={exportInspectPrompt}
+          onSendToCopilot={sendInspectPromptToCopilot}
+        />
+      )}
+      {copilotSession && (
+        <CopilotTerminal
+          {...copilotSession}
+          onStop={() => window.cdp.stopCopilot()}
+          onClose={() => setCopilotSession(null)}
         />
       )}
       <Toast toast={toast} />

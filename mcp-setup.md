@@ -2,7 +2,7 @@
 
 ## Status and intent
 
-This document is an implementation and rollout plan. It does not claim that Network Watch is already an MCP server.
+This document records the implemented MCP architecture and the remaining rollout work. The local `stdio` server, Streamable HTTP entry point, recording/replay tools, deterministic comparison, direct export responses, VS Code configuration, and Copilot CLI workspace configuration are now implemented.
 
 The goal is to let an LLM:
 
@@ -46,12 +46,14 @@ REPLAY-* session
   ACT-* replayed event
 ```
 
-There are four blockers before this can be exposed reliably:
+The initial blockers have been addressed as follows:
 
-1. `extensionState.recordings` exists only in Electron process memory and is lost when Network Watch exits.
-2. The extension can replay only `runtimeState.actions`, effectively the latest journey in that extension worker. It cannot currently accept a recording ID from Network Watch.
-3. Network requests live in renderer state. The MCP server cannot query a durable baseline or replay evidence set.
-4. Request-to-event correlation is currently a timestamp-window heuristic. It is useful evidence, but it must be labelled as inferred rather than exact.
+1. Recordings and replay jobs are persisted in the Electron user-data directory.
+2. The extension claims MCP replay jobs containing the selected recording and replays that `REC-*` ID.
+3. The Electron main process mirrors CDP request events for baseline/replay evidence and MCP exports.
+4. Request-to-event correlation remains an explicitly labelled timestamp-window inference rather than a causal claim.
+
+Production remote rollout still requires an authenticated HTTPS deployment or approved secure tunnel, tenant isolation, and an OAuth policy appropriate to the target ChatGPT workspace.
 
 ## Target architecture
 

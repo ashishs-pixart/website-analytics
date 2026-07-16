@@ -4,11 +4,14 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const CDP = require('chrome-remote-interface');
+const { NetworkWatchStore } = require('./network-watch-store');
 
 let mainWindow;
 let activeClient = null;
 let activeTarget = null;
 let extensionBridge = null;
+let networkWatchStore = null;
+let copilotProcess = null;
 const EXTENSION_BRIDGE_PORT = 9231;
 const extensionState = {
   screenshots: [],
@@ -19,6 +22,9 @@ const extensionState = {
 function extensionStateSnapshot() {
   return {
     ...extensionState,
+    recordings: networkWatchStore
+      ? networkWatchStore.recordings.map(({ requestEvidence, ...recording }) => recording)
+      : extensionState.recordings,
     connected: extensionState.lastExtensionActivity
       ? Date.now() - new Date(extensionState.lastExtensionActivity).getTime() < 15000
       : false,
@@ -26,11 +32,37 @@ function extensionStateSnapshot() {
   };
 }
 
+function readJsonBody(request, sendJson, callback) {
+  let body = '';
+  let tooLarge = false;
+  request.setEncoding('utf8');
+  request.on('data', chunk => {
+    if (tooLarge) return;
+    body += chunk;
+    if (body.length > 32 * 1024 * 1024) {
+      tooLarge = true;
+      sendJson(413, { ok: false, error: 'Payload too large' });
+      request.destroy();
+    }
+  });
+  request.on('end', () => {
+    if (tooLarge) return;
+    try {
+      const value = body ? JSON.parse(body) : {};
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected an object');
+      callback(value);
+    } catch (error) {
+      sendJson(400, { ok: false, error: `Invalid JSON: ${error.message}` });
+    }
+  });
+}
+
 function startExtensionBridge() {
   if (extensionBridge) return;
 
   extensionBridge = http.createServer((request, response) => {
     const origin = request.headers.origin;
+    const requestUrl = new URL(request.url, `http://127.0.0.1:${EXTENSION_BRIDGE_PORT}`);
     if (origin && !origin.startsWith('chrome-extension://')) {
       response.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ ok: false, error: 'Only Chrome extensions may use this bridge.' }));
@@ -52,57 +84,114 @@ function startExtensionBridge() {
       response.end(JSON.stringify(value));
     };
 
-    if (request.method === 'GET' && request.url === '/health') {
+    if (request.method === 'GET' && requestUrl.pathname === '/health') {
       extensionState.lastExtensionActivity = new Date().toISOString();
       sendJson(200, { ok: true, app: 'Network Watch', port: EXTENSION_BRIDGE_PORT });
       return;
     }
 
-    if (request.method === 'GET' && request.url === '/api/state') {
+    if (request.method === 'GET' && requestUrl.pathname === '/api/state') {
       sendJson(200, { ok: true, state: extensionStateSnapshot() });
       return;
     }
 
-    if (request.method === 'DELETE' && request.url === '/api/state') {
+    if (request.method === 'DELETE' && requestUrl.pathname === '/api/state') {
       extensionState.screenshots = [];
-      extensionState.recordings = [];
+      networkWatchStore.clearRecordings();
       sendJson(200, { ok: true, state: extensionStateSnapshot() });
       return;
     }
 
-    const collection = request.url === '/api/screenshots'
+    if (request.method === 'GET' && requestUrl.pathname === '/api/recordings') {
+      const result = networkWatchStore.listRecordings({ limit: requestUrl.searchParams.get('limit'), cursor: requestUrl.searchParams.get('cursor') });
+      sendJson(200, { ok: true, ...result });
+      return;
+    }
+
+    const recordingMatch = requestUrl.pathname.match(/^\/api\/recordings\/(REC-[^/]+)$/);
+    if (request.method === 'GET' && recordingMatch) {
+      const recording = networkWatchStore.getRecording(decodeURIComponent(recordingMatch[1]));
+      sendJson(recording ? 200 : 404, recording ? { ok: true, recording } : { ok: false, error: 'Recording not found' });
+      return;
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/replay-jobs') {
+      readJsonBody(request, sendJson, value => {
+        try {
+          const job = networkWatchStore.createReplayJob(value.recordingId, value.idempotencyKey || null);
+          sendJson(202, { ok: true, job });
+        } catch (error) {
+          sendJson(404, { ok: false, error: error.message });
+        }
+      });
+      return;
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/replay-jobs/next') {
+      const claimed = networkWatchStore.claimReplayJob();
+      sendJson(200, { ok: true, claimed });
+      return;
+    }
+
+    const replayJobMatch = requestUrl.pathname.match(/^\/api\/replay-jobs\/(REPLAY-[^/]+)$/);
+    if (request.method === 'GET' && replayJobMatch) {
+      const job = networkWatchStore.getReplayJob(decodeURIComponent(replayJobMatch[1]));
+      sendJson(job ? 200 : 404, job ? { ok: true, job } : { ok: false, error: 'Replay run not found' });
+      return;
+    }
+
+    const replayFailureMatch = requestUrl.pathname.match(/^\/api\/replay-jobs\/(REPLAY-[^/]+)\/fail$/);
+    if (request.method === 'POST' && replayFailureMatch) {
+      readJsonBody(request, sendJson, value => {
+        const job = networkWatchStore.failReplayJob(decodeURIComponent(replayFailureMatch[1]), value.error);
+        sendJson(job ? 200 : 404, job ? { ok: true, job } : { ok: false, error: 'Replay run not found' });
+      });
+      return;
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/export/recording') {
+      try {
+        const result = networkWatchStore.exportRecording({
+          recordingId: requestUrl.searchParams.get('recordingId'),
+          runId: requestUrl.searchParams.get('runId'),
+          format: requestUrl.searchParams.get('format') === 'json' ? 'json' : 'markdown',
+        });
+        sendJson(200, { ok: true, ...result });
+      } catch (error) {
+        sendJson(404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/export/network') {
+      const result = networkWatchStore.exportNetwork(requestUrl.searchParams.get('format') === 'markdown' ? 'markdown' : 'json');
+      sendJson(200, { ok: true, ...result });
+      return;
+    }
+
+    const collection = requestUrl.pathname === '/api/screenshots'
       ? extensionState.screenshots
-      : request.url === '/api/recordings'
+      : requestUrl.pathname === '/api/recordings'
         ? extensionState.recordings
         : null;
-    const collectionLimit = request.url === '/api/screenshots' ? 30 : 100;
+    const collectionLimit = requestUrl.pathname === '/api/screenshots' ? 30 : 100;
 
     if (request.method !== 'POST' || !collection) {
       sendJson(404, { ok: false, error: 'Not found' });
       return;
     }
 
-    let body = '';
-    let tooLarge = false;
-    request.setEncoding('utf8');
-    request.on('data', chunk => {
-      if (tooLarge) return;
-      body += chunk;
-      if (body.length > 32 * 1024 * 1024) {
-        tooLarge = true;
-        sendJson(413, { ok: false, error: 'Payload too large' });
-        request.destroy();
-      }
-    });
-    request.on('end', () => {
-      if (tooLarge) return;
+    readJsonBody(request, sendJson, value => {
       try {
-        const value = JSON.parse(body);
-        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected an object');
         extensionState.lastExtensionActivity = new Date().toISOString();
-        collection.unshift(value);
-        if (collection.length > collectionLimit) collection.length = collectionLimit;
-        sendJson(201, { ok: true });
+        if (requestUrl.pathname === '/api/recordings') {
+          const recording = networkWatchStore.addRecording(value);
+          sendJson(201, { ok: true, recording });
+        } else {
+          collection.unshift(value);
+          if (collection.length > collectionLimit) collection.length = collectionLimit;
+          sendJson(201, { ok: true });
+        }
       } catch (error) {
         sendJson(400, { ok: false, error: `Invalid JSON: ${error.message}` });
       }
@@ -177,7 +266,13 @@ function createWindow() {
   Menu.setApplicationMenu(menu);
 }
 
+function emitNetworkEvent(event) {
+  networkWatchStore?.addNetworkEvent(event);
+  mainWindow?.webContents.send('network-event', event);
+}
+
 app.whenReady().then(() => {
+  networkWatchStore = new NetworkWatchStore(path.join(app.getPath('userData'), 'network-watch-store.json'));
   startExtensionBridge();
   createWindow();
 });
@@ -334,7 +429,7 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
     await Page.enable();
 
     Network.requestWillBeSent(params => {
-      mainWindow?.webContents.send('network-event', {
+      emitNetworkEvent({
         type: 'request',
         requestId: params.requestId,
         loaderId: params.loaderId,
@@ -352,7 +447,7 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
     });
 
     Network.requestWillBeSentExtraInfo?.(params => {
-      mainWindow?.webContents.send('network-event', {
+      emitNetworkEvent({
         type: 'request-extra',
         requestId: params.requestId,
         headers: params.headers,
@@ -361,7 +456,7 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
     });
 
     Network.responseReceived(params => {
-      mainWindow?.webContents.send('network-event', {
+      emitNetworkEvent({
         type: 'response',
         requestId: params.requestId,
         timestamp: params.timestamp,
@@ -381,7 +476,7 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
     });
 
     Network.responseReceivedExtraInfo?.(params => {
-      mainWindow?.webContents.send('network-event', {
+      emitNetworkEvent({
         type: 'response-extra',
         requestId: params.requestId,
         headers: params.headers,
@@ -392,7 +487,7 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
     });
 
     Network.loadingFinished(params => {
-      mainWindow?.webContents.send('network-event', {
+      emitNetworkEvent({
         type: 'finished',
         requestId: params.requestId,
         timestamp: params.timestamp,
@@ -401,7 +496,7 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
     });
 
     Network.loadingFailed(params => {
-      mainWindow?.webContents.send('network-event', {
+      emitNetworkEvent({
         type: 'failed',
         requestId: params.requestId,
         timestamp: params.timestamp,
@@ -413,7 +508,7 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
     });
 
     Network.webSocketCreated(params => {
-      mainWindow?.webContents.send('network-event', {
+      emitNetworkEvent({
         type: 'ws-created',
         requestId: params.requestId,
         url: params.url,
@@ -422,7 +517,7 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
     });
 
     Network.webSocketFrameSent(params => {
-      mainWindow?.webContents.send('network-event', {
+      emitNetworkEvent({
         type: 'ws-sent',
         requestId: params.requestId,
         timestamp: params.timestamp,
@@ -432,7 +527,7 @@ ipcMain.handle('attach-target', async (_event, { host = 'localhost', port = 9222
     });
 
     Network.webSocketFrameReceived(params => {
-      mainWindow?.webContents.send('network-event', {
+      emitNetworkEvent({
         type: 'ws-received',
         requestId: params.requestId,
         timestamp: params.timestamp,
@@ -485,11 +580,74 @@ ipcMain.handle('save-file', async (_event, { defaultPath, content }) => {
   }
 });
 
+ipcMain.handle('start-copilot', async (_event, { prompt }) => {
+  if (!mainWindow) return { ok: false, error: 'No window available' };
+  if (copilotProcess) return { ok: false, error: 'A Copilot task is already running.' };
+  if (typeof prompt !== 'string' || !prompt.trim()) return { ok: false, error: 'The prompt is empty.' };
+
+  const selected = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select the code directory for Copilot',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+
+  const executablePath = findExecutableOnPath(['copilot']);
+  if (!executablePath) {
+    return { ok: false, error: 'GitHub Copilot CLI was not found on PATH. Install it and sign in, then restart Network Watch.' };
+  }
+
+  const directory = selected.filePaths[0];
+  const approval = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Send to Copilot', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Allow Copilot to work on this directory?',
+    message: 'Copilot will be allowed to edit files and run commands.',
+    detail: `Directory: ${directory}\n\nReview the generated prompt before continuing. Copilot will run in bounded autopilot mode (up to 10 continuations).`,
+  });
+  if (approval.response !== 0) return { ok: false, canceled: true };
+
+  try {
+    const child = spawn(executablePath, [
+      '--autopilot',
+      '--allow-all',
+      '--max-autopilot-continues', '10',
+      '--no-color',
+      '-p', prompt,
+    ], { cwd: directory, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    copilotProcess = child;
+    const send = (kind, data = {}) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('copilot-event', { kind, ...data });
+    };
+    child.stdout.on('data', chunk => send('output', { stream: 'stdout', text: chunk.toString() }));
+    child.stderr.on('data', chunk => send('output', { stream: 'stderr', text: chunk.toString() }));
+    child.on('error', error => {
+      send('error', { error: error.message });
+      if (copilotProcess === child) copilotProcess = null;
+    });
+    child.on('close', (code, signal) => {
+      send('exit', { code, signal });
+      if (copilotProcess === child) copilotProcess = null;
+    });
+    return { ok: true, directory };
+  } catch (error) {
+    copilotProcess = null;
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('stop-copilot', async () => {
+  if (!copilotProcess) return { ok: true };
+  copilotProcess.kill('SIGTERM');
+  return { ok: true };
+});
+
 ipcMain.handle('get-extension-data', async () => ({ ok: true, state: extensionStateSnapshot() }));
 
 ipcMain.handle('clear-extension-data', async () => {
   extensionState.screenshots = [];
-  extensionState.recordings = [];
+  networkWatchStore.clearRecordings();
   return { ok: true, state: extensionStateSnapshot() };
 });
 

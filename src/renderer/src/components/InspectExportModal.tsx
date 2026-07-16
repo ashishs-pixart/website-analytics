@@ -17,9 +17,10 @@ type InspectExportModalProps = {
   onElementFeedbackChange: (id: string, value: string) => void;
   onClose: () => void;
   onExport: (scope: { breakpoints: boolean; events: boolean }) => void;
+  onSendToCopilot: (scope: { breakpoints: boolean; events: boolean }) => void;
 };
 
-export function InspectExportModal({ screenshots, feedback, recordings, actionFeedback, elementFeedback, exporting, includeMeaningfulRequests, networkRequests, onIncludeMeaningfulRequestsChange, onFeedbackChange, onActionFeedbackChange, onElementFeedbackChange, onClose, onExport }: InspectExportModalProps) {
+export function InspectExportModal({ screenshots, feedback, recordings, actionFeedback, elementFeedback, exporting, includeMeaningfulRequests, networkRequests, onIncludeMeaningfulRequestsChange, onFeedbackChange, onActionFeedbackChange, onElementFeedbackChange, onClose, onExport, onSendToCopilot }: InspectExportModalProps) {
   const [includeBreakpoints, setIncludeBreakpoints] = useState(true);
   const [includeEvents, setIncludeEvents] = useState(false);
   const eventsAccordionRef = useRef<HTMLDetailsElement>(null);
@@ -134,6 +135,7 @@ export function InspectExportModal({ screenshots, feedback, recordings, actionFe
         <div className="modal-actions">
           <span className="review-count">{includeBreakpoints ? reviewedCount : 0} screenshot{reviewedCount === 1 ? '' : 's'}, {includeBreakpoints ? reviewedElementCount : 0} element note{reviewedElementCount === 1 ? '' : 's'}, {includeEvents ? totalEventCount : 0} event{totalEventCount === 1 ? '' : 's'} · {includeEvents ? reviewedActionCount : 0} change note{reviewedActionCount === 1 ? '' : 's'}</span>
           <button className="btn btn-ghost" onClick={onClose} disabled={exporting}>Cancel</button>
+          <button className="btn btn-secondary" onClick={() => onSendToCopilot({ breakpoints: includeBreakpoints, events: includeEvents })} disabled={!canExport || exporting}>Send to Copilot</button>
           <button className="btn btn-primary" onClick={() => onExport({ breakpoints: includeBreakpoints, events: includeEvents })} disabled={!canExport || exporting}>{exporting ? 'Preparing...' : 'Export prompt'}</button>
         </div>
       </div>

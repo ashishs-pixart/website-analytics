@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "network-watch": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["mcp/stdio.mjs"],
+      "cwd": ".",
+      "env": {
+        "NETWORK_WATCH_URL": "http://127.0.0.1:9231"
+      },
+      "tools": [
+        "list_recordings",
+        "get_recording",
+        "replay_recording",
+        "get_replay_result",
+        "export_recording_analysis",
+        "export_network_capture"
+      ],
+      "deferTools": "never",
+      "timeout": 180000
+    }
+  }
+}

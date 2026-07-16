@@ -194,6 +194,8 @@ export type CdpApi = {
   attachTarget: (opts: { host: string; port: number; targetId: string }) => Promise<ApiResult<Record<string, never>>>;
   getResponseBody: (opts: { requestId: string }) => Promise<ApiResult<{ body: string; base64Encoded: boolean }>>;
   saveFile: (opts: { defaultPath: string; content: string }) => Promise<ApiResult<{ path: string }>>;
+  startCopilot: (opts: { prompt: string }) => Promise<ApiResult<{ directory: string }>>;
+  stopCopilot: () => Promise<ApiResult<Record<string, never>>>;
   startBrowserDebug: (opts: { port: number }) => Promise<ApiResult<StartBrowserResult>>;
   getExtensionData: () => Promise<ApiResult<{ state: ExtensionState }>>;
   clearExtensionData: () => Promise<ApiResult<{ state: ExtensionState }>>;
@@ -202,5 +204,11 @@ export type CdpApi = {
   onTargetDisconnected: (callback: (event: { targetId: string | null }) => void) => void;
   onExportRequests: (callback: () => void) => void;
   onShowHelp: (callback: () => void) => void;
+  onCopilotEvent: (callback: (event: CopilotEvent) => void) => () => void;
   removeAllListeners: () => void;
 };
+
+export type CopilotEvent =
+  | { kind: 'output'; stream: 'stdout' | 'stderr'; text: string }
+  | { kind: 'error'; error: string }
+  | { kind: 'exit'; code: number | null; signal: string | null };

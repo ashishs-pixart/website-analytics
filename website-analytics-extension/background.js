@@ -1,6 +1,7 @@
 const BRIDGE_URL = 'http://127.0.0.1:9231';
 const MAX_ACTIONS = 500;
 const MAX_RECORDINGS = 10;
+const MCP_REPLAY_ALARM = 'network-watch-mcp-replay';
 const BREAKPOINT_DWELL_MS = 6000;
 const BREAKPOINTS = [
   { width: 1920, height: 1080, label: 'Desktop 1080p' },
@@ -296,9 +297,9 @@ async function sendReplayProgress(tabId, replayRecording, entries, phase, succes
   } catch { /* Navigation can temporarily replace the content script; the next update recreates the panel. */ }
 }
 
-async function replayActions(recordingId) {
+async function replayActions(recordingId, suppliedRecording = null, requestedRunId = null) {
   const recordings = availableRecordings();
-  const sourceRecording = recordings.find(recording => recording.id === recordingId) || recordings[0];
+  const sourceRecording = suppliedRecording || recordings.find(recording => recording.id === recordingId) || recordings[0];
   if (!sourceRecording?.actions.length) throw new Error('Record at least one action before replaying.');
   const sourceActions = sourceRecording.actions;
   const tab = await activeTab();
@@ -308,7 +309,7 @@ async function replayActions(recordingId) {
 
   const replayStartedAt = new Date().toISOString();
   const replayRecording = {
-    id: `REPLAY-${crypto.randomUUID()}`,
+    id: requestedRunId || `REPLAY-${crypto.randomUUID()}`,
     kind: 'replay',
     sourceRecordingId: sourceRecording.id,
     url: sourceRecording.url || tab.url || '',
@@ -424,6 +425,27 @@ async function replayActions(recordingId) {
     state: publicState(await bridgeConnected()),
     replaySummary: { successfulActions, failedActions, totalActions: replayRecording.actions.length, replayId: replayRecording.id },
   };
+}
+
+async function claimMcpReplayJob() {
+  if (runtimeState.recording || runtimeState.replaying) return;
+  let claimed;
+  try {
+    claimed = (await bridgeRequest('/api/replay-jobs/next')).claimed;
+  } catch {
+    return;
+  }
+  if (!claimed?.job || !claimed.recording) return;
+  try {
+    await replayActions(claimed.recording.id, claimed.recording, claimed.job.runId);
+  } catch (error) {
+    try {
+      await bridgeRequest(`/api/replay-jobs/${encodeURIComponent(claimed.job.runId)}/fail`, {
+        method: 'POST',
+        body: JSON.stringify({ error: error.message }),
+      });
+    } catch { /* The MCP caller will time out if Network Watch closed during the replay. */ }
+  }
 }
 
 function debuggerTarget(tabId) {
@@ -743,3 +765,20 @@ chrome.debugger.onDetach.addListener(source => {
     persistState();
   }
 });
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create(MCP_REPLAY_ALARM, { periodInMinutes: 0.5 });
+  claimMcpReplayJob();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  chrome.alarms.create(MCP_REPLAY_ALARM, { periodInMinutes: 0.5 });
+  claimMcpReplayJob();
+});
+
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === MCP_REPLAY_ALARM) stateReady.then(claimMcpReplayJob);
+});
+
+chrome.alarms.create(MCP_REPLAY_ALARM, { periodInMinutes: 0.5 });
+stateReady.then(claimMcpReplayJob);

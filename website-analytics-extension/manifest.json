@@ -5,6 +5,7 @@
   "description": "Record and replay website journeys, simulate responsive breakpoints, and send annotated screenshots to Network Watch.",
   "permissions": [
     "activeTab",
+    "alarms",
     "debugger",
     "scripting",
     "storage",

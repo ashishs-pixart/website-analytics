@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "network-watch": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp/stdio.mjs"],
+      "env": {
+        "NETWORK_WATCH_URL": "http://127.0.0.1:9231"
+      }
+    }
+  }
+}

@@ -34,14 +34,15 @@ select {
 }
 
 #toolbar {
-    height: 58px;
+    min-height: 58px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 14px;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
-    gap: 12px
+    gap: 12px;
+    min-width: 0
 }
 
 .toolbar-left,
@@ -51,6 +52,27 @@ select {
     display: flex;
     align-items: center;
     gap: 8px
+}
+
+.toolbar-left {
+    flex: 1 1 auto;
+    min-width: 0
+}
+
+.toolbar-right {
+    flex: 0 0 auto;
+    margin-left: auto;
+    white-space: nowrap
+}
+
+.connect-group {
+    flex: 0 1 auto;
+    min-width: 0
+}
+
+.target-group {
+    flex: 1 1 260px;
+    min-width: 120px
 }
 
 .logo {
@@ -87,15 +109,20 @@ select:focus {
 }
 
 #inp-host {
-    width: 130px
+    width: clamp(88px, 9vw, 130px)
 }
 
 #inp-port {
-    width: 82px
+    width: clamp(62px, 5vw, 82px)
 }
 
+.target-group select,
 #sel-target {
-    width: min(35vw, 430px)
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: min(35vw, 430px);
+    text-overflow: ellipsis
 }
 
 .btn {
@@ -1314,6 +1341,33 @@ textarea:focus {
     color: var(--muted)
 }
 
+.copilot-terminal-modal {
+    width: min(980px, 92vw)
+}
+
+.copilot-terminal-output {
+    min-height: 360px;
+    max-height: 62vh;
+    overflow: auto;
+    margin: 16px 0;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: #080b11;
+    color: #d7e2f2;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace
+}
+
+.copilot-run-status {
+    color: var(--muted)
+}
+
+.copilot-run-status.running {
+    color: #61d394
+}
+
 .meaningful-request-option {
     display: flex;
     gap: 10px;
@@ -1418,8 +1472,9 @@ small {
         display: none
     }
 
+    .target-group select,
     #sel-target {
-        width: 260px
+        max-width: 260px
     }
 
     .type-filters {
@@ -1432,5 +1487,43 @@ small {
 
     .screenshot-grid {
         grid-template-columns: 1fr
+    }
+}
+
+@media(max-width:1500px) {
+    #toolbar {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        padding-block: 7px
+    }
+
+    .toolbar-left {
+        flex-basis: 100%;
+        width: 100%
+    }
+
+    .toolbar-right {
+        margin-left: 0
+    }
+
+    .target-group select,
+    #sel-target {
+        max-width: none
+    }
+}
+
+@media(max-width:900px) {
+    .toolbar-left,
+    .connect-group,
+    .target-group {
+        flex-wrap: wrap
+    }
+
+    .target-group {
+        flex-basis: 100%
+    }
+
+    .target-group select {
+        min-width: 160px
     }
 }
