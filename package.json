@@ -1,0 +1,53 @@
+{
+  "name": "network-inspector",
+  "version": "1.0.0",
+  "description": "A desktop Chrome DevTools Protocol network inspector built with Electron.",
+  "main": "src/main.js",
+  "author": "",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build:renderer": "vite build --config vite.config.ts",
+    "start": "pnpm run build:renderer && electron .",
+    "dev": "pnpm run build:renderer && electron . --dev",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "chrome-remote-interface": "^0.33.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  },
+  "build": {
+    "appId": "com.example.networkinspector",
+    "productName": "Network Inspector",
+    "files": [
+      "src/**/*",
+      "dist/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "assets"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Development"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+services:
+  network-inspector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: network-inspector
+    container_name: network-inspector
+    environment: 
+      DISPLAY: ":99"
+      ELECTRON_DISABLE_GPU: "1"
+      NO_AT_BRIDGE: "1"
+      NOVNC_PORT: "6080"
+      VNC_PORT: "5900"
+    ports:
+      - "6080:6080"
+      - "5900:5900"

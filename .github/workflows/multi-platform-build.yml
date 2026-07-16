@@ -1,0 +1,110 @@
+name: Multi-Platform Electron Build
+
+on:
+  push:
+    branches: ["master"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build for ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            artifact_name: network-inspector-linux
+            build_args: --linux AppImage
+
+          - os: windows-latest
+            platform: windows
+            artifact_name: network-inspector-windows
+            build_args: --win nsis
+
+          - os: macos-latest
+            platform: macos
+            artifact_name: network-inspector-macos
+            build_args: --mac dmg zip
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm exec tsc --noEmit
+
+      - name: Build renderer
+        run: pnpm run build:renderer
+
+      - name: Build Electron package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm exec electron-builder ${{ matrix.build_args }} --publish never
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          find dist -maxdepth 1 -type f \( \
+            -name "*.AppImage" -o \
+            -name "*.exe" -o \
+            -name "*.dmg" -o \
+            -name "*.zip" -o \
+            -name "*.blockmap" \
+          \) -print -exec cp {} release-artifacts/ \;
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: release-artifacts/*
+          if-no-files-found: error
+
+  publish:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          TAG_NAME="build-$(date +'%Y%m%d-%H%M%S')"
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Network Inspector ${{ steps.tag.outputs.tag }}
+          files: release-artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

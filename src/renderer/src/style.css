@@ -1,0 +1,12 @@
+@import "../../style.css";
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#detail-empty {
+  position: static;
+  flex: 1;
+}
