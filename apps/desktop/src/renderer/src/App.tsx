@@ -12,7 +12,7 @@ import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
 import { Toolbar } from './components/Toolbar';
 import type { DetailTab, StatusKind } from './constants';
-import type { ExtensionState, NetworkRequest, Target, ToastState } from './types';
+import type { ExtensionState, NetworkRequest, ReplayRequestComparison, Target, ToastState } from './types';
 import { captureReducer } from './utils/capture';
 import { formatBytes } from './utils/format';
 import { makePostmanCollection, makeSelectedFieldsExport, type ExportField } from './utils/export';
@@ -68,21 +68,42 @@ export function App() {
   }, []);
 
   const totalBytes = useMemo(() => Array.from(requests.values()).reduce((sum, req) => sum + (req.encodedDataLength || 0), 0), [requests]);
-  const allRequests = useMemo(() => order.map((id) => requests.get(id)).filter((request): request is NetworkRequest => Boolean(request)), [order, requests]);
-  const selectedRequest = selectedId ? requests.get(selectedId) : undefined;
+  const comparisonsByRequestId = useMemo(() => {
+    const result = new Map<string, ReplayRequestComparison>();
+    for (const recording of extensionState.recordings) {
+      for (const event of recording.comparison?.events || []) {
+        for (const pair of event.requests?.matched || []) {
+          result.set(pair.baselineRequestId, {
+            role: 'recording', responseSame: pair.responseSame, responseComparisonBasis: pair.responseComparisonBasis,
+            responseMessage: pair.responseMessage, counterpartRequestId: pair.replayRequestId,
+            counterpartDurationMs: pair.replayDurationMs, timingComparison: pair.timingComparison,
+          });
+          result.set(pair.replayRequestId, {
+            role: 'replay', responseSame: pair.responseSame, responseComparisonBasis: pair.responseComparisonBasis,
+            responseMessage: pair.responseMessage, counterpartRequestId: pair.baselineRequestId,
+            counterpartDurationMs: pair.baselineDurationMs, timingComparison: pair.timingComparison,
+          });
+        }
+      }
+    }
+    return result;
+  }, [extensionState.recordings]);
+  const allRequests = useMemo(() => order
+    .map((id) => requests.get(id))
+    .filter((request): request is NetworkRequest => Boolean(request))
+    .map((request) => ({ ...request, replayComparison: comparisonsByRequestId.get(request.id) })), [comparisonsByRequestId, order, requests]);
+  const selectedRequest = selectedId ? allRequests.find((request) => request.id === selectedId) : undefined;
 
   const filteredRequests = useMemo(() => {
     const query = filterText.trim().toLowerCase();
-    return order
-      .map((id) => requests.get(id))
-      .filter((req): req is NetworkRequest => Boolean(req))
+    return allRequests
       .filter((req) => {
         if (filterType !== 'all' && req.resourceType !== filterType) return false;
         if (errorsOnly && !(req.failed || (typeof req.status === 'number' && req.status >= 400))) return false;
         if (!query) return true;
         return [req.url, req.method, req.status, req.resourceType, req.mimeType].some((value) => String(value ?? '').toLowerCase().includes(query));
       });
-  }, [errorsOnly, filterText, filterType, order, requests]);
+  }, [allRequests, errorsOnly, filterText, filterType]);
 
   const scanTargets = useCallback(async () => {
     setScanning(true);

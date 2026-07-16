@@ -55,11 +55,16 @@ export function formatReplayReport(job) {
     const unexpected = event.requests?.unexpected || [];
     if (!matched.length && !missing.length && !unexpected.length) lines.push('Requests: none');
     matched.forEach((request, index) => {
-      const responseSame = request.responseSame ?? request.baselineStatus === request.replayStatus;
+      const responseMessage = request.responseMessage
+        || (request.responseSame === true
+          ? 'Same response received as in the recording.'
+          : request.responseSame === false
+            ? 'A different response was received than in the recording.'
+            : 'Response status matched the recording, but the response body was not available to compare.');
       lines.push(
         `Request ${index + 1}: ${request.method || request.fingerprint} ${request.url || ''}`.trim(),
         ...(request.hierarchyMessage ? [`Hierarchy: ${request.hierarchyMessage}`] : []),
-        `Response: ${request.responseMessage || (responseSame ? 'Same response received.' : 'A different response was received.')} (${request.baselineStatus ?? 'unknown'} recorded, ${request.replayStatus ?? 'unknown'} replay; compared by ${request.responseComparisonBasis || 'status'}).`,
+        `Response: ${responseMessage} (${request.baselineStatus ?? 'unknown'} recorded, ${request.replayStatus ?? 'unknown'} replay; compared by ${request.responseComparisonBasis || 'status'}).`,
         `Time: ${timingMessage(request)}`,
       );
     });

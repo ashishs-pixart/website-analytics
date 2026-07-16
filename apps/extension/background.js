@@ -258,27 +258,44 @@ async function dispatchTrustedClick(tabId, action, frameId, debuggerState) {
   if (frameId) throw new Error('Trusted browser clicks are limited to the main document; using the DOM fallback for this frame.');
   const target = await sendToTab(tabId, { type: 'RESOLVE_REPLAY_TARGET', action }, { frameId: 0 });
   if (!target?.ok) throw new Error(target?.error || 'Could not resolve the click target.');
-  await ensureReplayDebugger(tabId, debuggerState);
   const coordinates = { x: target.x, y: target.y };
-  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...coordinates });
-  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchMouseEvent', { type: 'mousePressed', ...coordinates, button: 'left', clickCount: 1 });
-  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...coordinates, button: 'left', clickCount: 1 });
+  await sendReplayDebuggerCommand(tabId, debuggerState, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...coordinates });
+  await sendReplayDebuggerCommand(tabId, debuggerState, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...coordinates, button: 'left', clickCount: 1 });
+  await sendReplayDebuggerCommand(tabId, debuggerState, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...coordinates, button: 'left', clickCount: 1 });
   return target;
 }
 
 async function ensureReplayDebugger(tabId, debuggerState) {
-  if (debuggerState.attachError) throw new Error(debuggerState.attachError);
-  if (!debuggerState.available) {
-    try {
-      if (!(runtimeState.simulation.active && runtimeState.simulation.tabId === tabId)) {
-        await chrome.debugger.attach(debuggerTarget(tabId), '1.3');
-        debuggerState.attachedByReplay = true;
-      }
-      debuggerState.available = true;
-    } catch (error) {
-      debuggerState.attachError = error.message;
-      throw error;
-    }
+  const targets = await chrome.debugger.getTargets();
+  const attached = targets.some(target => target.tabId === tabId && target.attached);
+  if (attached) {
+    debuggerState.available = true;
+    debuggerState.attachError = '';
+    return;
+  }
+  debuggerState.available = false;
+  debuggerState.attachError = '';
+  try {
+    await chrome.debugger.attach(debuggerTarget(tabId), '1.3');
+    debuggerState.available = true;
+    // A replay repairs a stale simulation attachment but leaves it connected for the simulation.
+    if (!(runtimeState.simulation.active && runtimeState.simulation.tabId === tabId)) debuggerState.attachedByReplay = true;
+  } catch (error) {
+    debuggerState.attachError = error.message;
+    throw error;
+  }
+}
+
+async function sendReplayDebuggerCommand(tabId, debuggerState, method, params) {
+  await ensureReplayDebugger(tabId, debuggerState);
+  try {
+    return await chrome.debugger.sendCommand(debuggerTarget(tabId), method, params);
+  } catch (error) {
+    if (!/not attached|detached/i.test(error.message || '')) throw error;
+    debuggerState.available = false;
+    debuggerState.attachError = '';
+    await ensureReplayDebugger(tabId, debuggerState);
+    return chrome.debugger.sendCommand(debuggerTarget(tabId), method, params);
   }
 }
 
@@ -298,7 +315,6 @@ function virtualKeyCode(action) {
 async function dispatchTrustedKeypress(tabId, action, frameId, debuggerState) {
   const target = await sendToTab(tabId, { type: 'FOCUS_REPLAY_TARGET', action }, { frameId: frameId || 0 });
   if (!target?.ok) throw new Error(target?.error || 'Could not focus the keyboard target.');
-  await ensureReplayDebugger(tabId, debuggerState);
   const modifiers = (action.altKey ? 1 : 0) | (action.ctrlKey ? 2 : 0) | (action.metaKey ? 4 : 0) | (action.shiftKey ? 8 : 0);
   const key = action.key || '';
   const printableText = !action.altKey && !action.ctrlKey && !action.metaKey
@@ -311,14 +327,14 @@ async function dispatchTrustedKeypress(tabId, action, frameId, debuggerState) {
     windowsVirtualKeyCode: virtualKeyCode(action),
     location: Number(action.location) || 0,
   };
-  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchKeyEvent', {
+  await sendReplayDebuggerCommand(tabId, debuggerState, 'Input.dispatchKeyEvent', {
     ...keyEvent,
     type: printableText ? 'keyDown' : 'rawKeyDown',
     text: printableText,
     unmodifiedText: printableText,
     autoRepeat: Boolean(action.repeat),
   });
-  await chrome.debugger.sendCommand(debuggerTarget(tabId), 'Input.dispatchKeyEvent', { ...keyEvent, type: 'keyUp' });
+  await sendReplayDebuggerCommand(tabId, debuggerState, 'Input.dispatchKeyEvent', { ...keyEvent, type: 'keyUp' });
   return target;
 }
 
@@ -397,7 +413,7 @@ async function replayActions(recordingId, suppliedRecording = null, requestedRun
   let successfulActions = 0;
   let failedActions = 0;
   const progressEntries = [];
-  const replayDebugger = { available: runtimeState.simulation.active && runtimeState.simulation.tabId === tab.id, attachedByReplay: false, attachError: '' };
+  const replayDebugger = { available: false, attachedByReplay: false, attachError: '' };
 
   try {
     if (sourceRecording.url) {
@@ -456,6 +472,9 @@ async function replayActions(recordingId, suppliedRecording = null, requestedRun
             result = { ok: true, resolutionMethod: target.resolutionMethod };
             replayAction.executionMethod = 'cdp-trusted-key';
           } catch (trustedKeyError) {
+            if (replayAction.key === 'Enter') {
+              throw new Error(`Could not dispatch a trusted Enter key after reattaching the browser debugger: ${trustedKeyError.message}`);
+            }
             result = await sendToTab(tab.id, { type: 'REPLAY_ACTION', action: replayAction, index }, { frameId: replayFrameId });
             replayAction.executionMethod = 'dom-key-event-fallback';
             replayAction.executionWarning = `Trusted key dispatch unavailable: ${trustedKeyError.message}`;

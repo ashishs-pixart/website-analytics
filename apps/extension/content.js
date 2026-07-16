@@ -64,7 +64,15 @@ function elementLabel(element) {
   if ('labels' in element && element.labels?.length) {
     return normalizedText(Array.from(element.labels).map(label => label.textContent || '').join(' ')).slice(0, 300);
   }
-  return normalizedText(element.closest('label')?.textContent).slice(0, 300);
+  const wrappedLabel = normalizedText(element.closest('label')?.textContent);
+  if (wrappedLabel) return wrappedLabel.slice(0, 300);
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+    const adjacentLabel = [element.previousElementSibling, element.nextElementSibling]
+      .find(candidate => candidate?.tagName?.toLowerCase() === 'label');
+    const adjacentLabelText = normalizedText(adjacentLabel?.textContent || adjacentLabel?.getAttribute?.('title'));
+    if (adjacentLabelText) return adjacentLabelText.slice(0, 300);
+  }
+  return '';
 }
 
 function elementRole(element) {
@@ -295,6 +303,50 @@ function hierarchyPathText(path) {
   return (path || []).map(node => `${node.tagName}:nth-of-type(${node.nthOfType})`).join(' > ');
 }
 
+function enterTargetFingerprint(element) {
+  const structuralContainer = element.closest('form, section, main, article, aside, dialog, fieldset, [role="form"], [role="dialog"], [role="search"]')
+    || element.parentElement;
+  const textEntryPeers = structuralContainer
+    ? Array.from(structuralContainer.querySelectorAll('input, textarea, select, [contenteditable="true"]'))
+      .filter(candidate => candidate instanceof Element && isVisibleElement(candidate))
+    : [];
+  return {
+    tagName: element.tagName.toLowerCase(),
+    inputType: element instanceof HTMLInputElement ? element.type : element.getAttribute('type') || '',
+    label: elementLabel(element),
+    placeholder: normalizedText(element.getAttribute('placeholder')),
+    ancestorTags: hierarchyPath(element).map(node => node.tagName),
+    containerTagName: structuralContainer?.tagName?.toLowerCase() || '',
+    inputIndex: Math.max(0, textEntryPeers.indexOf(element)),
+    inputCount: textEntryPeers.length,
+  };
+}
+
+function tagPathSimilarity(expected = [], actual = []) {
+  if (!expected.length || !actual.length) return 0;
+  const rows = Array.from({ length: expected.length + 1 }, () => Array(actual.length + 1).fill(0));
+  for (let left = 1; left <= expected.length; left += 1) {
+    for (let right = 1; right <= actual.length; right += 1) {
+      rows[left][right] = expected[left - 1] === actual[right - 1]
+        ? rows[left - 1][right - 1] + 1
+        : Math.max(rows[left - 1][right], rows[left][right - 1]);
+    }
+  }
+  return rows[expected.length][actual.length] / Math.max(expected.length, actual.length);
+}
+
+function enterFingerprintScore(candidate, expected) {
+  if (!expected || candidate.tagName.toLowerCase() !== expected.tagName) return -1;
+  const actual = enterTargetFingerprint(candidate);
+  let score = Math.round(tagPathSimilarity(expected.ancestorTags, actual.ancestorTags) * 100);
+  if (expected.inputType && actual.inputType === expected.inputType) score += 25;
+  if (expected.containerTagName && actual.containerTagName === expected.containerTagName) score += 35;
+  if (Number.isInteger(expected.inputIndex) && actual.inputIndex === expected.inputIndex) score += 45;
+  if (expected.label && actual.label === expected.label) score += 140;
+  if (expected.placeholder && actual.placeholder === expected.placeholder) score += 90;
+  return score;
+}
+
 function elementFromHierarchyPath(path) {
   if (!Array.isArray(path) || !path.length) return null;
   const [root, ...descendants] = path;
@@ -433,6 +485,7 @@ function elementLocator(element) {
       parent: siblingContext.parentText || undefined,
       landmark: landmark?.role || undefined,
     },
+    enterTarget: isTextEntry(element) ? enterTargetFingerprint(element) : undefined,
     href: element instanceof HTMLAnchorElement ? element.href : undefined,
     text: (element.innerText || element.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 300),
   };
@@ -548,6 +601,7 @@ document.addEventListener('keydown', event => {
     flushPendingInput(element);
     sendRecordedAction('keypress', element, {
       key: 'Enter', code: event.code.slice(0, 80),
+      domEvent: { type: event.type, bubbles: event.bubbles, cancelable: event.cancelable, composed: event.composed },
       location: event.location, repeat: event.repeat, isComposing: event.isComposing,
       altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey,
       form: element.form ? { action: element.form.action, method: element.form.method } : undefined,
@@ -558,6 +612,7 @@ document.addEventListener('keydown', event => {
   sendRecordedAction('keypress', element, {
     key: event.key.slice(0, 80),
     code: event.code.slice(0, 80),
+    domEvent: { type: event.type, bubbles: event.bubbles, cancelable: event.cancelable, composed: event.composed },
     location: event.location,
     repeat: event.repeat,
     isComposing: event.isComposing,
@@ -757,6 +812,35 @@ function findReplayElement(action) {
     const matches = candidates.filter(predicate);
     return matches.length === 1 ? matches[0] : null;
   };
+
+  if (action.type === 'keypress' && action.key === 'Enter') {
+    const expectedLabel = normalizedText(locator.label || locator.previousSiblingText || locator.nextSiblingText);
+    if (expectedLabel) {
+      const match = uniqueMatch(candidate => (
+        candidate instanceof HTMLInputElement
+        || candidate instanceof HTMLTextAreaElement
+        || candidate instanceof HTMLSelectElement
+      ) && elementLabel(candidate) === expectedLabel);
+      if (match) return { element: match, method: 'enter-input-label' };
+    }
+    const expectedEnterTarget = locator.enterTarget || (locator.hierarchyPath?.length ? {
+      tagName: locator.tagName || action.tagName || 'input',
+      inputType: locator.inputType || '',
+      label: locator.label || '',
+      placeholder: normalizedText(locator.placeholder),
+      ancestorTags: locator.hierarchyPath.map(node => node.tagName),
+      containerTagName: '',
+    } : null);
+    if (expectedEnterTarget) {
+      const ranked = candidates
+        .map((candidate, index) => ({ candidate, index, score: enterFingerprintScore(candidate, expectedEnterTarget) }))
+        .filter(item => item.score >= 0)
+        .sort((left, right) => right.score - left.score || left.index - right.index);
+      if (ranked[0]?.score >= 95 && (ranked.length === 1 || ranked[0].score >= ranked[1].score + 15)) {
+        return { element: ranked[0].candidate, method: `enter-structural-fingerprint:${ranked[0].score}` };
+      }
+    }
+  }
 
   // Follow Playwright's resilient locator order: user-facing semantics, then explicit test contracts.
   if (locator.role && locator.accessibleName) {
@@ -983,15 +1067,22 @@ async function replayAction(action) {
     element.click();
   } else if (action.type === 'keypress') {
     element.focus();
-    element.dispatchEvent(new KeyboardEvent('keydown', {
+    const keyboardEvent = {
       key: action.key || '', code: action.code || '', bubbles: true,
+      cancelable: true, composed: true,
       altKey: action.altKey, ctrlKey: action.ctrlKey, metaKey: action.metaKey, shiftKey: action.shiftKey,
-    }));
+    };
+    const form = 'form' in element ? element.form : null;
+    let submitted = false;
+    const markSubmitted = () => { submitted = true; };
+    form?.addEventListener('submit', markSubmitted, { capture: true, once: true });
+    const shouldRunDefault = element.dispatchEvent(new KeyboardEvent(action.domEvent?.type || 'keydown', keyboardEvent));
+    if (action.key === 'Enter') element.dispatchEvent(new KeyboardEvent('keypress', keyboardEvent));
     element.dispatchEvent(new KeyboardEvent('keyup', {
-      key: action.key || '', code: action.code || '', bubbles: true,
-      altKey: action.altKey, ctrlKey: action.ctrlKey, metaKey: action.metaKey, shiftKey: action.shiftKey,
+      ...keyboardEvent,
     }));
-    if (action.key === 'Enter' && element.form) element.form.requestSubmit();
+    if (action.key === 'Enter' && form && shouldRunDefault && !submitted) form.requestSubmit();
+    form?.removeEventListener('submit', markSubmitted, { capture: true });
   } else if ('value' in element) {
     const inputResult = await applyInputAction(element, action);
     return { ...inputResult, resolutionMethod };

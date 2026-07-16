@@ -13,7 +13,7 @@ export function RequestTable({ requests, totalCount, selectedId, onSelect }: Req
     <div id="request-list-wrap">
       <table id="request-table">
         <thead>
-          <tr><th className="col-status">Status</th><th className="col-method">Method</th><th className="col-type">Type</th><th className="col-url">URL</th><th className="col-size">Size</th><th className="col-time">Time</th></tr>
+          <tr><th className="col-status">Status</th><th className="col-method">Method</th><th className="col-type">Type</th><th className="col-url">URL</th><th className="col-match">Replay</th><th className="col-size">Size</th><th className="col-time">Time</th></tr>
         </thead>
         <tbody>
           {requests.map((req) => {
@@ -24,6 +24,7 @@ export function RequestTable({ requests, totalCount, selectedId, onSelect }: Req
                 <td><span className={`method-pill ${methodClass(req.method)}`}>{req.method || '-'}</span></td>
                 <td><span className="type-pill">{req.resourceType || 'Other'}</span></td>
                 <td title={req.url}><span className="url-host">{url.host}</span>{url.path}</td>
+                <td>{req.replayComparison ? <span className={`comparison-pill ${req.replayComparison.responseSame === true ? 'comparison-same' : req.replayComparison.responseSame === false ? 'comparison-different' : 'comparison-unknown'}`} title={req.replayComparison.responseMessage}>{req.replayComparison.responseSame === true ? 'Same response' : req.replayComparison.responseSame === false ? 'Response changed' : 'Body unavailable'}</span> : '-'}</td>
                 <td>{formatBytes(req.encodedDataLength)}</td>
                 <td>{formatMs(requestDuration(req))}</td>
               </tr>

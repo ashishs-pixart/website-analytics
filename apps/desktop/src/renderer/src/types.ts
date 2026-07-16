@@ -44,6 +44,17 @@ export type NetworkRequest = {
   remoteIPAddress?: string;
   remotePort?: number;
   headersText?: string;
+  replayComparison?: ReplayRequestComparison;
+};
+
+export type ReplayRequestComparison = {
+  role: 'recording' | 'replay';
+  responseSame: boolean | null;
+  responseComparisonBasis: 'body-hash' | 'status-and-error';
+  responseMessage: string;
+  counterpartRequestId: string;
+  counterpartDurationMs: number | null;
+  timingComparison: 'faster' | 'slower' | 'same' | 'unknown';
 };
 
 export type NetworkEvent = {
@@ -133,6 +144,12 @@ export type RecordedAction = {
   ctrlKey?: boolean;
   metaKey?: boolean;
   shiftKey?: boolean;
+  domEvent?: {
+    type: string;
+    bubbles: boolean;
+    cancelable: boolean;
+    composed: boolean;
+  };
   form?: { action: string; method: string };
   source?: string;
   locator?: {
@@ -192,6 +209,16 @@ export type RecordedAction = {
       parent?: string;
       landmark?: string;
     };
+    enterTarget?: {
+      tagName: string;
+      inputType: string;
+      label: string;
+      placeholder: string;
+      ancestorTags: string[];
+      containerTagName: string;
+      inputIndex: number;
+      inputCount: number;
+    };
     domHierarchy?: Array<{
       tagName: string;
       id?: string;
@@ -250,6 +277,22 @@ export type ExtensionRecording = {
     failedActions: number;
     totalActions: number;
   };
+  comparison?: {
+    events?: Array<{
+      requests?: {
+        matched?: Array<{
+          baselineRequestId: string;
+          replayRequestId: string;
+          baselineDurationMs: number | null;
+          replayDurationMs: number | null;
+          responseSame: boolean | null;
+          responseComparisonBasis: 'body-hash' | 'status-and-error';
+          responseMessage: string;
+          timingComparison: 'faster' | 'slower' | 'same' | 'unknown';
+        }>;
+      };
+    }>;
+  } | null;
 };
 
 export type ExtensionState = {

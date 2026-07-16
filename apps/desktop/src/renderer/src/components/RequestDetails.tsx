@@ -60,6 +60,10 @@ export function RequestDetails({ request, activeTab, setActiveTab, onLoadBody }:
                 <div className="k">From Cache</div><div>{request.fromCache ? 'Yes' : 'No'}</div>
                 <div className="k">Transferred</div><div>{formatBytes(request.encodedDataLength)}</div>
                 <div className="k">Duration</div><div>{formatMs(requestDuration(request))}</div>
+                {request.replayComparison && <>
+                  <div className="k">Replay comparison</div><div className={`comparison-detail ${request.replayComparison.responseSame === true ? 'comparison-same' : request.replayComparison.responseSame === false ? 'comparison-different' : 'comparison-unknown'}`}>{request.replayComparison.responseMessage}</div>
+                  <div className="k">Replay timing</div><div>{request.replayComparison.timingComparison === 'unknown' ? 'Timing unavailable' : request.replayComparison.timingComparison === 'same' ? 'Same duration' : `${request.replayComparison.timingComparison === 'faster' ? 'Faster' : 'Slower'} than the ${request.replayComparison.role === 'replay' ? 'recording' : 'replay'} (${formatMs(request.replayComparison.counterpartDurationMs)})`}</div>
+                </>}
               </div>
             </div>
             <div className="section"><h3>Request Headers</h3><HeadersTable headers={{ ...request.requestHeaders, ...request.requestExtraHeaders }} /></div>

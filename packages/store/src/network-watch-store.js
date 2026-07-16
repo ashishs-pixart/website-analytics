@@ -226,7 +226,7 @@ function compareRequestLists(baseline = [], replay = []) {
         basis: 'body-hash',
       };
     }
-    return { same: outcomeSame, basis: 'status-and-error' };
+    return { same: outcomeSame ? null : false, basis: 'status-and-error' };
   }
 
   function timingComparison(baselineDurationMs, replayDurationMs) {
@@ -257,7 +257,11 @@ function compareRequestLists(baseline = [], replay = []) {
       replayStatus: actual.status,
       responseSame: response.same,
       responseComparisonBasis: response.basis,
-      responseMessage: response.same ? 'Same response received.' : 'A different response was received.',
+      responseMessage: response.same === true
+        ? 'Same response received as in the recording.'
+        : response.same === false
+          ? 'A different response was received than in the recording.'
+          : 'Response status matched the recording, but the response body was not available to compare.',
       baselineDurationMs: expected.durationMs,
       replayDurationMs: actual.durationMs,
       deltaMs,
@@ -276,7 +280,7 @@ function compareRequestLists(baseline = [], replay = []) {
         : null,
     };
     if (expected.status !== actual.status) statusChanged.push(pair);
-    if (!response.same && expected.status === actual.status) responseChanged.push(pair);
+    if (response.same === false && expected.status === actual.status) responseChanged.push(pair);
     matched.push(pair);
   });
 

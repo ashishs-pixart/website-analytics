@@ -73,6 +73,8 @@ test('completed replay compares action order and request equality', () => {
   assert.equal(completed.comparison.summary.requestsMatch, true);
   assert.equal(completed.comparison.summary.equivalent, true);
   assert.equal(completed.comparison.summary.matchedRequestCount, 1);
+  assert.equal(completed.comparison.events[0].requests.matched[0].responseSame, null);
+  assert.match(completed.comparison.events[0].requests.matched[0].responseMessage, /body was not available to compare/);
   assert.match(completed.comparison.summary.message, /All 1 actions replayed in order/);
 
   const exported = store.exportRecording({ recordingId: 'REC-checkout', runId: job.runId, format: 'markdown' });
@@ -124,7 +126,7 @@ test('replay stores exact response equality and faster request timing without AI
   assert.equal(event.success, true);
   assert.equal(request.responseSame, true);
   assert.equal(request.responseComparisonBasis, 'body-hash');
-  assert.equal(request.responseMessage, 'Same response received.');
+  assert.equal(request.responseMessage, 'Same response received as in the recording.');
   assert.equal(request.timingComparison, 'faster');
   assert.equal(Math.round(request.deltaMs), -150);
 });
@@ -146,7 +148,7 @@ test('same request and status with a different response body fails comparison', 
   assert.equal(comparison.summary.requestsMatch, false);
   assert.equal(comparison.summary.responseChangedRequestCount, 1);
   assert.equal(comparison.events[0].requests.matched[0].responseSame, false);
-  assert.equal(comparison.events[0].requests.matched[0].responseMessage, 'A different response was received.');
+  assert.equal(comparison.events[0].requests.matched[0].responseMessage, 'A different response was received than in the recording.');
 });
 
 test('request hierarchy accepts a recorded request triggered during an earlier replay action', () => {

@@ -199,3 +199,61 @@ test('replay retries semantic resolution while a rerendered element appears', as
   assert.equal(result.resolutionMethod, 'role-and-accessible-name');
   assert.equal(harness.document.querySelector('button').dataset.clicked, 'true');
 });
+
+test('Enter replay matches an input by the adjacent label text', async t => {
+  const harness = createHarness(`
+    <div><label>Customer number</label><input id="wrong" aria-label="Search"></div>
+    <div><label>Order number</label><input id="target" aria-label="Search"></div>
+  `);
+  t.after(harness.close);
+  let enteredOn = null;
+  harness.document.querySelectorAll('input').forEach(input => {
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') enteredOn = input.id;
+    });
+  });
+
+  const result = await harness.replay({
+    type: 'keypress', key: 'Enter', code: 'Enter', selector: '#stale-input',
+    locator: {
+      tagName: 'input', role: 'textbox', accessibleName: 'Search',
+      label: 'Order number', hierarchyPath: hierarchyPath(['html'], ['body'], ['div', 1], ['input']),
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.resolutionMethod, 'enter-input-label');
+  assert.equal(enteredOn, 'target');
+});
+
+test('Enter replay ignores changed ids and classes and uses structure plus input position', async t => {
+  const harness = createHarness(`
+    <main><div><section><div class="new-runtime-wrapper">
+      <input id="generated-a-new" class="changed-a">
+      <input id="generated-b-new" class="changed-b">
+    </div></section></div></main>
+  `);
+  t.after(harness.close);
+  const events = [];
+  harness.document.querySelector('#generated-b-new').addEventListener('keydown', event => events.push(event.type));
+  harness.document.querySelector('#generated-b-new').addEventListener('keypress', event => events.push(event.type));
+  harness.document.querySelector('#generated-b-new').addEventListener('keyup', event => events.push(event.type));
+
+  const result = await harness.replay({
+    type: 'keypress', key: 'Enter', code: 'Enter', selector: '#old-generated-id',
+    domEvent: { type: 'keydown', bubbles: true, cancelable: true, composed: true },
+    locator: {
+      tagName: 'input', inputType: 'text',
+      enterTarget: {
+        tagName: 'input', inputType: 'text', label: '', placeholder: '',
+        ancestorTags: ['html', 'body', 'div', 'section', 'input'],
+        containerTagName: 'section', inputIndex: 1, inputCount: 2,
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.match(result.resolutionMethod, /^enter-structural-fingerprint:/);
+  assert.equal(harness.document.activeElement.id, 'generated-b-new');
+  assert.deepEqual(events, ['keydown', 'keypress', 'keyup']);
+});

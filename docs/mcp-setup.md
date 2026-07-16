@@ -355,7 +355,7 @@ Completed output:
             "replayStatus": 200,
             "responseSame": true,
             "responseComparisonBasis": "body-hash",
-            "responseMessage": "Same response received.",
+            "responseMessage": "Same response received as in the recording.",
             "baselineDurationMs": 420,
             "replayDurationMs": 810,
             "deltaMs": 390,

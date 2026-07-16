@@ -350,6 +350,10 @@ tbody tr.selected {
     width: 90px
 }
 
+.col-match {
+    width: 118px
+}
+
 .col-size {
     width: 92px
 }
@@ -366,6 +370,30 @@ tbody tr.selected {
     padding: 2px 6px;
     font-weight: 700;
     font-size: 12px
+}
+
+.comparison-pill,
+.comparison-detail {
+    display: inline-block;
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-weight: 700;
+    font-size: 12px
+}
+
+.comparison-same {
+    color: var(--good);
+    background: #123d2c
+}
+
+.comparison-different {
+    color: var(--bad);
+    background: #451a27
+}
+
+.comparison-unknown {
+    color: var(--warn);
+    background: #493b16
 }
 
 .status-pending {

@@ -14,7 +14,7 @@ test('replay report gives the model action success, response equality, and timin
           matched: [{
             method: 'GET', url: 'https://example.test/api/search',
             baselineStatus: 200, replayStatus: 200, responseSame: true,
-            responseComparisonBasis: 'body-hash', responseMessage: 'Same response received.',
+            responseComparisonBasis: 'body-hash', responseMessage: 'Same response received as in the recording.',
             baselineDurationMs: 250, replayDurationMs: 100, deltaMs: -150, timingComparison: 'faster',
             hierarchyAccepted: true,
             hierarchyMessage: 'Matched occurrence 1 across action windows: recorded action 2, replay action 1.',
@@ -27,7 +27,7 @@ test('replay report gives the model action success, response equality, and timin
 
   assert.match(report, /Action 1 - Success: true/);
   assert.match(report, /Request 1: GET https:\/\/example\.test\/api\/search/);
-  assert.match(report, /Response: Same response received\./);
+  assert.match(report, /Response: Same response received as in the recording\./);
   assert.match(report, /Hierarchy: Matched occurrence 1 across action windows: recorded action 2, replay action 1\./);
   assert.match(report, /Replay took 150 ms faster \(100 ms vs 250 ms recorded\)/);
 });

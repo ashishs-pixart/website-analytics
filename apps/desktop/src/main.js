@@ -23,10 +23,23 @@ const extensionState = {
 };
 
 function extensionStateSnapshot() {
+  const replayComparisons = new Map();
+  if (networkWatchStore) {
+    for (const job of networkWatchStore.jobs) {
+      if (job.status !== 'completed' || !job.replayId || !job.comparison) continue;
+      // Use the public job getter so response hashes remain private to the store.
+      replayComparisons.set(job.replayId, networkWatchStore.getReplayJob(job.runId)?.comparison || null);
+    }
+  }
   return {
     ...extensionState,
     recordings: networkWatchStore
-      ? networkWatchStore.recordings.map(({ requestEvidence, ...recording }) => recording)
+      ? networkWatchStore.recordings.map(({ requestEvidence, ...recording }) => ({
+        ...recording,
+        ...(recording.kind === 'replay' && replayComparisons.has(recording.id)
+          ? { comparison: replayComparisons.get(recording.id) }
+          : {}),
+      }))
       : extensionState.recordings,
     connected: extensionState.lastExtensionActivity
       ? Date.now() - new Date(extensionState.lastExtensionActivity).getTime() < 15000
