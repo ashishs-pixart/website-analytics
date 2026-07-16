@@ -18,7 +18,7 @@ For local stdio, the chain is:
 ```text
 Copilot CLI or VS Code
   → reads .mcp.json or .vscode/mcp.json
-  → starts node mcp/stdio.mjs
+  → starts node services/mcp/stdio.mjs
   → MCP tool call
   → NetworkWatchClient HTTP call to 127.0.0.1:9231
   → durable store / replay queue in Electron
@@ -27,7 +27,7 @@ Copilot CLI or VS Code
 
 The stdio MCP process is intentionally disposable. The client starts it for the session, communicates through stdin/stdout, and stops it later. Persistent state belongs to Network Watch, not to the stdio process.
 
-For Streamable HTTP, `mcp/http.mjs` is a separately started transport on port 9232. It still needs the Electron bridge on port 9231. Exposing port 9232 without running Network Watch produces discoverable tools that fail when called because their data source is absent.
+For Streamable HTTP, `services/mcp/http.mjs` is a separately started transport on port 9232. It still needs the Electron bridge on port 9231. Exposing port 9232 without running Network Watch produces discoverable tools that fail when called because their data source is absent.
 
 ## GitHub Copilot CLI: two integrations, not one
 
@@ -45,7 +45,7 @@ This path does not require MCP. Network Watch has already inserted the chosen sc
 
 ### Copilot CLI using Network Watch MCP tools
 
-When Copilot starts in this repository, it discovers [`.mcp.json`](../.mcp.json), starts `mcp/stdio.mjs`, and can call tools such as `list_recordings` and `replay_recording`. Workspace MCP files are discovered from the CLI working directory up to the Git root, so selecting an unrelated repository in the Inspect sidebar does not automatically carry this repository's `.mcp.json` into that project.
+When Copilot starts in this repository, it discovers [`.mcp.json`](../.mcp.json), starts `services/mcp/stdio.mjs`, and can call tools such as `list_recordings` and `replay_recording`. Workspace MCP files are discovered from the CLI working directory up to the Git root, so selecting an unrelated repository in the Inspect sidebar does not automatically carry this repository's `.mcp.json` into that project.
 
 For another repository:
 
@@ -65,7 +65,7 @@ The [custom agent](https://docs.github.com/en/copilot/how-tos/copilot-cli/custom
 docker compose up --build network-inspector
 ```
 
-Open `http://127.0.0.1:6080/vnc.html?autoconnect=1` to see the Electron desktop. Chromium is installed in the image, so **Start browser** can launch a browser in the same container and Network Watch can reach its loopback CDP port. Load the unpacked extension from `/app/website-analytics-extension` inside that Chromium profile.
+Open `http://127.0.0.1:6080/vnc.html?autoconnect=1` to see the Electron desktop. Chromium is installed in the image, so **Start Browser** launches it in the same container, reaches its loopback CDP port, and automatically loads `/app/apps/extension` into the dedicated profile.
 
 Compose binds VNC, noVNC, the extension bridge, and MCP ports to host loopback only. Application data is stored in the `network-watch-data` volume.
 
@@ -100,27 +100,51 @@ The workflow has three responsibilities:
 
 This avoids creating a GitHub release for every push. Packaging remains unsigned unless signing and notarization secrets are added.
 
-## Argument against the current code structure
+## Current repository boundaries
 
-The repository works as an MVP, but the boundaries are increasingly expensive:
+The repository now separates independently deployed/runtime components:
 
-- `src/main.js` owns Electron lifecycle, CDP, the HTTP bridge, file dialogs, browser launching, persistence wiring, and Copilot process supervision. A change to any backend feature risks the whole desktop entry point.
-- `src/network-watch-store.js` combines persistence, schema normalization, redaction, request attribution, comparison, replay jobs, and export formatting. These policies should be independently testable.
-- `website-analytics-extension/background.js` combines recording history, replay execution, MCP polling, responsive emulation, screenshots, and popup messaging.
+```text
+apps/
+  desktop/                Electron main/preload/renderer and bundled assets
+  extension/              Manifest V3 worker, content scripts, popup, and styles
+services/
+  mcp/                    stdio/HTTP transports and MCP tool registration
+packages/
+  store/                  durable recording/job/evidence repository and comparison
+  bridge-client/          localhost API client used by MCP
+infra/
+  docker/                 image and container desktop entrypoint
+docs/
+test/
+```
+
+The root keeps `package.json`, lockfiles, Vite/TypeScript configuration, `docker-compose.yml`, and MCP client declarations. Keeping Compose at the root preserves the conventional `docker compose up` command; moving it under `infra/docker` would make the common entry point less discoverable without creating a runtime boundary.
+
+The remaining boundaries are still expensive:
+
+- `apps/desktop/src/main.js` owns Electron lifecycle, CDP, the HTTP bridge, file dialogs, browser launching, persistence wiring, and Copilot process supervision. A change to any backend feature risks the whole desktop entry point.
+- `packages/store/src/network-watch-store.js` combines persistence, schema normalization, redaction, request attribution, comparison, replay jobs, and export formatting. These policies should be independently testable.
+- `apps/extension/background.js` combines recording history, replay execution, MCP polling, responsive emulation, screenshots, and popup messaging.
 - The renderer is reasonably componentized, but it imports one global stylesheet and owns network capture, Inspect export, and Copilot session state in a single `App` component.
-- Docker, packaging, MCP, extension, desktop, and documentation all live at the root without a clear application/package boundary.
 - Shared recording/action contracts are duplicated as JavaScript objects, TypeScript types, and implicit MCP/store shapes. Drift is already a larger risk than file count.
 
-## Recommended target layout
+## Why the full proposed package split is premature
 
-These components can and should be separated, but moving files without first extracting contracts would only relocate coupling.
+`domain`, `replay-analysis`, and `cdp` are good eventual boundaries, but creating them as empty directories or single-file forwarding packages would make navigation worse. A package should have a stable public API, an independent test surface, and at least two consumers or a clear replacement boundary. Today:
+
+- CDP capture is used only by the desktop main process.
+- Replay analysis is tightly coupled to the durable store's evidence shape.
+- Domain contracts exist in renderer TypeScript, extension JavaScript, store normalization, and MCP Zod schemas but are not yet generated from one source.
+
+The useful next target remains:
 
 ```text
 apps/
   desktop/
-    main/                 Electron bootstrap and IPC composition
-    preload/
-    renderer/
+    src/main/             Electron bootstrap and IPC composition
+    src/preload/
+    src/renderer/
   extension/              Manifest, popup, worker, content scripts
 services/
   mcp/                    stdio and HTTP transport entry points
@@ -129,7 +153,7 @@ packages/
   store/                  persistence adapters and migrations
   replay-analysis/        request normalization, comparison, exports
   cdp/                    target discovery and network capture
-  bridge-client/          typed client used by MCP and tests
+  bridge-client/          local API client (already extracted)
 infra/
   docker/
 docs/
@@ -141,10 +165,9 @@ test/
 Recommended extraction order:
 
 1. Create `packages/domain` with versioned Zod schemas and generated or inferred TypeScript types.
-2. Split `network-watch-store.js` into persistence, redaction, comparison, and export modules without changing runtime behavior.
-3. Split `main.js` into CDP, bridge routes, browser launcher, and Copilot runner; leave `main.js` as dependency composition only.
-4. Move the existing extension under `apps/extension` and add a small build step so it can consume shared browser-safe schemas.
-5. Move MCP under `services/mcp`, using the shared bridge client and domain contracts.
-6. Move infrastructure files last, after Electron Builder, Docker COPY paths, MCP configs, tests, and extension-loading documentation have been updated together.
+2. Split `packages/store/src/network-watch-store.js` into persistence, redaction, comparison, and export modules without changing runtime behavior.
+3. Split `apps/desktop/src/main.js` into CDP capture, bridge routes, browser launcher, and Copilot runner; leave `main.js` as dependency composition only.
+4. Add an extension build step only when `apps/extension` consumes browser-safe shared domain schemas.
+5. Move replay comparison to `packages/replay-analysis` after its input/output contract no longer depends on store internals.
 
 Do not split the MCP transport into its own remote deployment yet while its only data source is a loopback Electron process. For a real hosted MCP service, first move recordings and replay jobs into a network-accessible, authenticated multi-user backend and treat the desktop and extension as agents of that service.

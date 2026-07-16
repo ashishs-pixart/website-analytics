@@ -18,10 +18,14 @@ The combined output is designed to be understandable by both developers and lang
 
 ```text
 network-watch/
-├── src/                         Electron desktop application
-├── website-analytics-extension Chrome Manifest V3 extension
-├── PRODUCT_SPEC.md              This specification
-└── README.md                    Setup and usage guide
+├── apps/desktop/                Electron main, preload, renderer, and assets
+├── apps/extension/              Chrome Manifest V3 extension
+├── services/mcp/                MCP stdio and Streamable HTTP adapters
+├── packages/store/              Durable recording and replay evidence store
+├── packages/bridge-client/      Local service client used by MCP
+├── infra/docker/                Container image and entrypoint
+├── docs/                        Specifications and setup guidance
+└── test/                        Contract and integration tests
 ```
 
 The existing repository already represents `network-watch`, so it remains at the repository root. The extension is isolated in its own folder and can be loaded unpacked in Chrome.

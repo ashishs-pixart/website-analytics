@@ -6,13 +6,15 @@ Network Watch is an Electron desktop application, a Chrome extension, and an MCP
 
 | Component | Responsibility |
 | --- | --- |
-| Electron main process (`src/main.js`) | Opens the desktop window, connects to the Chrome DevTools Protocol (CDP), receives extension data over a localhost bridge, persists recordings, and starts Copilot CLI. |
-| React renderer (`src/renderer/src`) | Displays Network and Inspect modes, filters/exports requests, reviews screenshots and recordings, and hosts the Copilot sidebar. |
-| Preload bridge (`src/preload.js`) | Exposes a small, typed IPC API to the renderer while keeping Node.js disabled in the UI. |
+| Electron main process (`apps/desktop/src/main.js`) | Opens the desktop window, connects to the Chrome DevTools Protocol (CDP), receives extension data over a localhost bridge, persists recordings, and starts Copilot CLI. |
+| React renderer (`apps/desktop/src/renderer/src`) | Displays Network and Inspect modes, filters/exports requests, reviews screenshots and recordings, and hosts the Copilot sidebar. |
+| Preload bridge (`apps/desktop/src/preload.js`) | Exposes a small, typed IPC API to the renderer while keeping Node.js disabled in the UI. |
 | Chrome extension background worker | Owns extension state, controls recording, replay, responsive emulation, screenshots, and polling for MCP replay work. |
 | Chrome extension content script | Observes browser interactions, collects element metadata, displays overlays, resolves replay targets, and carries out DOM-level replay fallbacks. |
-| Durable store (`src/network-watch-store.js`) | Saves original recordings, replay runs, replay jobs, redacted request evidence, comparisons, and agent-facing exports. |
-| MCP server (`mcp/`) | Exposes recordings, replay, comparison, and exports as MCP tools through stdio or Streamable HTTP. |
+| Durable store (`packages/store/src/network-watch-store.js`) | Saves original recordings, replay runs, replay jobs, redacted request evidence, comparisons, and agent-facing exports. |
+| MCP server (`services/mcp/`) | Exposes recordings, replay, comparison, and exports as MCP tools through stdio or Streamable HTTP. |
+
+The Electron package includes `apps/extension` as an external runtime resource. **Start Browser** passes that directory with Chromium's `--load-extension` and `--disable-extensions-except` flags, so the dedicated debug profile receives the extension without a separate store installation.
 
 ## 2. Desktop application startup and local bridge
 
@@ -52,7 +54,7 @@ The current Network export dialog supports these outcomes:
 
 Selected-field export can include duration, payload, headers, request metadata, and response metadata/body. If response is selected and a completed request body has not been loaded, the app attempts `Network.getResponseBody` before generating the file. Postman export includes method, URL, request headers, and a raw request body when available.
 
-Electron opens the native save-file picker before a desktop file is written. `src/renderer/src/utils/har.ts` contains a HAR 1.2 builder, but no current button or menu action calls it; therefore HAR is an available implementation utility, not a user-visible export format. The HAR concept is defined by the [W3C HAR 1.2 draft](https://w3c.github.io/web-performance/specs/HAR/Overview.html).
+Electron opens the native save-file picker before a desktop file is written. `apps/desktop/src/renderer/src/utils/har.ts` contains a HAR 1.2 builder, but no current button or menu action calls it; therefore HAR is an available implementation utility, not a user-visible export format. The HAR concept is defined by the [W3C HAR 1.2 draft](https://w3c.github.io/web-performance/specs/HAR/Overview.html).
 
 ## 4. Extension lifecycle and state
 
@@ -240,7 +242,7 @@ Each tool declares input/output schemas, structured MCP content, a text fallback
 
 1. Keep Network Watch running.
 2. Open this repository or add an absolute-path server configuration to another workspace/user MCP configuration.
-3. The local workspace declaration is `.vscode/mcp.json`; it runs `node mcp/stdio.mjs` and supplies `NETWORK_WATCH_URL=http://127.0.0.1:9231`.
+3. The local workspace declaration is `.vscode/mcp.json`; it runs `node services/mcp/stdio.mjs` and supplies `NETWORK_WATCH_URL=http://127.0.0.1:9231`.
 4. Run **MCP: List Servers**, start `network-watch`, approve trust, then use Copilot Chat in Agent mode.
 
 ### GitHub Copilot CLI

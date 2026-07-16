@@ -1,0 +1,46 @@
+:root {
+  color-scheme: dark;
+  --bg: #09090b;
+  --panel: rgba(30, 12, 16, .74);
+  --panel-strong: rgba(53, 18, 25, .82);
+  --border: rgba(255, 115, 132, .22);
+  --text: #fff7f8;
+  --muted: #c3aeb2;
+  --accent: #ff526b;
+  --good: #ff9a62;
+  --bad: #ff7c8e;
+}
+
+* { box-sizing: border-box; }
+body { width: 370px; min-height: 450px; margin: 0; overflow-x: hidden; background: radial-gradient(circle at 2% -8%, #641d2b 0, transparent 39%), radial-gradient(circle at 100% 0%, #381016 0, transparent 33%), var(--bg); color: var(--text); font: 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px; border-bottom: 1px solid var(--border); background: rgba(10, 7, 9, .76); backdrop-filter: blur(18px); }
+header > div { display: flex; align-items: center; gap: 8px; }
+.mark { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid rgba(255, 143, 157, .54); border-radius: 9px; background: linear-gradient(135deg, rgba(237, 53, 80, .55), rgba(78, 12, 23, .45)); color: #fff1f3; font-size: 11px; font-weight: 900; letter-spacing: -.5px; box-shadow: inset 0 1px 0 rgba(255,255,255,.18); }
+.status { max-width: 150px; overflow: hidden; color: var(--muted); font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.status.online { color: var(--good); }
+main { padding: 10px; }
+section { padding: 12px; margin-bottom: 9px; border: 1px solid var(--border); border-radius: 13px; background: var(--panel); box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 8px 22px rgba(0,0,0,.22); backdrop-filter: blur(18px); }
+.section-heading { display: flex; justify-content: space-between; gap: 12px; }
+h1 { margin: 0 0 9px; font-size: 15px; letter-spacing: -.1px; }
+.count { min-width: 28px; height: 28px; padding: 5px 8px; border: 1px solid rgba(255, 126, 142, .42); border-radius: 99px; background: rgba(195, 39, 63, .25); color: #ffc1ca; font-size: 13px; font-weight: 800; }
+.button-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.button-row.three { grid-template-columns: repeat(3, 1fr); }
+.recording-control { display: grid; gap: 5px; margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.recording-control select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 9px; padding: 9px 28px 9px 10px; background: rgba(6, 4, 5, .52); color: var(--text); font: inherit; text-overflow: ellipsis; }
+.recording-control select:disabled { opacity: .5; }
+button { min-height: 40px; border: 1px solid var(--border); border-radius: 9px; padding: 9px; background: var(--panel-strong); color: var(--text); cursor: pointer; font: inherit; font-size: 13px; font-weight: 750; box-shadow: inset 0 1px 0 rgba(255,255,255,.08); transition: transform .12s ease, background .12s ease; }
+button:hover:not(:disabled) { background: rgba(96, 29, 40, .92); transform: translateY(-1px); }
+button:disabled { opacity: .42; cursor: not-allowed; }
+button.primary { border-color: rgba(255, 152, 165, .72); background: linear-gradient(135deg, #d42e46, #981e35); }
+button.recording { border-color: rgba(255, 171, 181, .74); background: linear-gradient(135deg, #b3213b, #681223); }
+.reset-button { width: 100%; min-height: 38px; margin-bottom: 8px; border-color: rgba(255, 135, 153, .45); background: rgba(91, 22, 35, .67); color: #ffd2d8; }
+.resolution { display: flex; align-items: center; justify-content: space-between; margin: 0 0 10px; padding: 9px 10px; border: 1px solid rgba(255, 148, 161, .15); border-radius: 9px; background: rgba(9, 4, 6, .43); color: var(--muted); font-size: 12px; }
+.resolution strong { color: var(--text); }
+.breakpoint-control { display: grid; grid-template-columns: 1fr auto; gap: 5px 9px; margin: 0 0 10px; color: var(--muted); font-size: 11px; }
+.breakpoint-control[hidden] { display: none; }
+.breakpoint-control input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.breakpoint-control strong { color: var(--text); }
+.selection { margin-bottom: 8px; padding: 9px 10px; border: 1px dashed rgba(255, 148, 161, .25); border-radius: 9px; background: rgba(9, 4, 6, .27); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#message { min-height: 18px; padding: 0 4px 6px; color: var(--muted); font-size: 11px; }
+#message.error { color: var(--bad); }
+#message.success { color: var(--good); }

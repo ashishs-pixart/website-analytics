@@ -3,7 +3,7 @@
     "network-watch": {
       "type": "stdio",
       "command": "node",
-      "args": ["mcp/stdio.mjs"],
+      "args": ["services/mcp/stdio.mjs"],
       "cwd": ".",
       "env": {
         "NETWORK_WATCH_URL": "http://127.0.0.1:9231"

@@ -83,15 +83,19 @@ The desktop app must remain running and connected while you record/replay if you
 
 ### 3. Load the Website Analytics extension
 
-The unpacked extension is in [`website-analytics-extension`](website-analytics-extension).
+When Network Watch starts a browser through **Start Browser**, it now loads the bundled Website Analytics extension into that dedicated debug profile automatically. Packaged Electron builds include the extension as an external resource, so it does not have to be published separately for this managed browser workflow.
+
+If you connect Network Watch to a browser you started yourself, load the unpacked extension from [`apps/extension`](apps/extension):
 
 1. In the same Chromium browser, open `chrome://extensions`.
 2. Turn on **Developer mode**.
 3. Click **Load unpacked**.
-4. Select the `website-analytics-extension` folder in this repository.
+4. Select the `apps/extension` folder in this repository.
 5. Pin the extension if you want quick access to its popup.
 
 After pulling changes to this project, click **Reload** on the extension card. The current version requires the `alarms` permission so it can claim MCP-triggered replay jobs.
+
+For public users in their normal Chrome profile, publish through the Chrome Web Store (public, unlisted, private testers, or private domain) or use enterprise policy. See [`docs/extension-distribution.md`](docs/extension-distribution.md).
 
 ### 4. Record a small safe journey
 
@@ -195,7 +199,7 @@ It listens at `http://127.0.0.1:9232/mcp`. Keep it localhost-only for developmen
 
 ## Website Analytics extension
 
-For responsive simulation, element selection, screenshots, and detailed extension behavior, see [`website-analytics-extension/README.md`](website-analytics-extension/README.md).
+For responsive simulation, element selection, screenshots, and detailed extension behavior, see [`apps/extension/README.md`](apps/extension/README.md).
 
 See [`PRODUCT_SPEC.md`](PRODUCT_SPEC.md) for architecture, phased implementation steps, security constraints, acceptance criteria, and known limitations.
 
@@ -229,12 +233,12 @@ See [`docs/deployment-and-architecture.md`](docs/deployment-and-architecture.md)
 ## Project layout
 
 ```text
-src/main.js       Electron main process and CDP bridge
-src/preload.js    Safe IPC API exposed to the renderer
-src/network-watch-store.js Durable recording, request evidence, replay, comparison, and export service
-src/renderer      React + TypeScript renderer app
-mcp               MCP server, stdio entry point, and Streamable HTTP entry point
-docs              Deployment and architecture guidance
-src/style.css     Shared dark developer-tool UI styles
-dist/renderer     Generated renderer build loaded by Electron
+apps/desktop/          Electron main process, preload, React renderer, assets, and renderer build
+apps/extension/        Manifest V3 extension loaded by the dedicated debug browser
+services/mcp/          MCP tool registration plus stdio and Streamable HTTP entry points
+packages/store/        Durable recordings, request evidence, replay jobs, comparisons, and exports
+packages/bridge-client Typed local bridge client used by the MCP service
+infra/docker/          Container image and desktop entrypoint
+docs/                  Setup, explanation, deployment, and distribution guidance
+test/                  Store and MCP contract/integration tests
 ```

@@ -120,7 +120,11 @@ export function App() {
       setHost(result.host);
       setPort(result.port);
       setStatus({ kind: 'idle', text: 'Browser started' });
-      showToast(`Started ${result.browser}: ${result.executablePath}`);
+      showToast(!result.extensionPath
+        ? `Started ${result.browser}; extension bundle was not found`
+        : result.extensionLoaded
+          ? `Started ${result.browser}; Website Analytics is loaded (shown in Extensions)`
+          : `Started ${result.browser}; check the Website Analytics card shown in Extensions`);
     } finally {
       setLaunchingBrowser(false);
     }
@@ -168,7 +172,7 @@ export function App() {
       setScreenshotFeedback({});
       setActionFeedback({});
       setElementFeedback({});
-      showToast('Extension data cleared');
+      showToast('Network Watch data cleared; the connected extension will reset shortly');
     }
   }, [showToast]);
 

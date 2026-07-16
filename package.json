@@ -2,15 +2,15 @@
   "name": "network-inspector",
   "version": "1.0.0",
   "description": "A desktop Chrome DevTools Protocol network inspector built with Electron.",
-  "main": "src/main.js",
+  "main": "apps/desktop/src/main.js",
   "author": "",
   "license": "MIT",
   "private": true,
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
     "build:renderer": "vite build --config vite.config.ts",
-    "mcp:stdio": "node mcp/stdio.mjs",
-    "mcp:http": "node mcp/http.mjs",
+    "mcp:stdio": "node services/mcp/stdio.mjs",
+    "mcp:http": "node services/mcp/http.mjs",
     "test:mcp": "node --test test/*.test.js test/*.test.mjs",
     "start": "pnpm run build:renderer && electron .",
     "dev": "pnpm run build:renderer && electron . --dev",
@@ -38,14 +38,22 @@
     "appId": "com.example.networkinspector",
     "productName": "Network Inspector",
     "files": [
-      "src/**/*",
-      "dist/**/*",
-      "assets/**/*",
-      "mcp/**/*",
+      "apps/desktop/src/**/*",
+      "apps/desktop/dist/**/*",
+      "apps/desktop/assets/**/*",
+      "services/mcp/**/*",
+      "packages/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "apps/extension",
+        "to": "extension",
+        "filter": ["**/*"]
+      }
+    ],
     "directories": {
-      "buildResources": "assets"
+      "buildResources": "apps/desktop/assets"
     },
     "mac": {
       "category": "public.app-category.developer-tools"

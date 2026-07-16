@@ -4,7 +4,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const CDP = require('chrome-remote-interface');
-const { NetworkWatchStore } = require('./network-watch-store');
+const { NetworkWatchStore } = require('../../../packages/store/src/network-watch-store');
 
 let mainWindow;
 let activeClient = null;
@@ -18,6 +18,7 @@ const extensionState = {
   screenshots: [],
   recordings: [],
   lastExtensionActivity: null,
+  resetRequestedAt: null,
 };
 
 function extensionStateSnapshot() {
@@ -99,7 +100,18 @@ function startExtensionBridge() {
     if (request.method === 'DELETE' && requestUrl.pathname === '/api/state') {
       extensionState.screenshots = [];
       networkWatchStore.clearRecordings();
+      // The extension claims this one-time command and clears its own chrome.storage state.
+      extensionState.resetRequestedAt = new Date().toISOString();
       sendJson(200, { ok: true, state: extensionStateSnapshot() });
+      return;
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/extension-commands/next') {
+      const command = extensionState.resetRequestedAt
+        ? { type: 'RESET_EXTENSION', requestedAt: extensionState.resetRequestedAt }
+        : null;
+      extensionState.resetRequestedAt = null;
+      sendJson(200, { ok: true, command });
       return;
     }
 
@@ -339,6 +351,43 @@ function findExecutableOnPath(names) {
   return null;
 }
 
+function bundledExtensionPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'extension')
+    : path.join(app.getAppPath(), 'apps', 'extension');
+}
+
+function inspectDebugTargets(port) {
+  return new Promise((resolve) => {
+    const request = http.get({ host: '127.0.0.1', port, path: '/json/list', timeout: 1500 }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          resolve([]);
+        }
+      });
+    });
+    request.on('timeout', () => request.destroy());
+    request.on('error', () => resolve([]));
+  });
+}
+
+async function confirmExtensionLaunch(port) {
+  // The Manifest V3 worker appears in CDP briefly as Chrome starts the extension.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const targets = await inspectDebugTargets(port);
+    if (targets.some((target) => target.type === 'service_worker' && String(target.url).startsWith('chrome-extension://'))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function findInstalledBrowsers() {
   const browsers = [];
   const add = (id, name, executablePath) => {
@@ -400,8 +449,14 @@ ipcMain.handle('start-browser-debug', async (_event, { port = 9222 } = {}) => {
     `--remote-debugging-port=${debugPort}`,
     '--remote-debugging-address=127.0.0.1',
     `--user-data-dir=${profileDir}`,
-    'about:blank',
   ];
+  const extensionPath = bundledExtensionPath();
+  const extensionAvailable = fileExists(path.join(extensionPath, 'manifest.json'));
+  if (extensionAvailable) {
+    args.push(`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`);
+  }
+  // Show the card on first launch so a hidden toolbar icon is never mistaken for a failed load.
+  args.push(extensionAvailable ? 'chrome://extensions/' : 'about:blank');
   if (process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
     args.unshift('--disable-dev-shm-usage', '--no-sandbox');
   }
@@ -412,12 +467,15 @@ ipcMain.handle('start-browser-debug', async (_event, { port = 9222 } = {}) => {
       stdio: 'ignore',
     });
     child.unref();
+    const extensionLoaded = extensionAvailable && await confirmExtensionLaunch(debugPort);
     return {
       ok: true,
       browser: browser.name,
       executablePath: browser.executablePath,
       host: 'localhost',
       port: debugPort,
+      extensionPath: extensionAvailable ? extensionPath : null,
+      extensionLoaded,
     };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -711,6 +769,7 @@ ipcMain.handle('get-extension-data', async () => ({ ok: true, state: extensionSt
 ipcMain.handle('clear-extension-data', async () => {
   extensionState.screenshots = [];
   networkWatchStore.clearRecordings();
+  extensionState.resetRequestedAt = new Date().toISOString();
   return { ok: true, state: extensionStateSnapshot() };
 });
 

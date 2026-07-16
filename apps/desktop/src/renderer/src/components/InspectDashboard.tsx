@@ -51,7 +51,7 @@ export function InspectDashboard({ state, feedback, actionFeedback, elementFeedb
         <div className="inspect-actions">
           <button className="btn btn-primary" onClick={onSetupCopilot}>{copilotConfigured ? 'Show Copilot' : 'Setup Copilot'}</button>
           <button className="btn btn-secondary" onClick={onRefresh}>Refresh</button>
-          <button className="btn btn-ghost" onClick={onClear} disabled={!state.screenshots.length && !state.recordings.length}>Clear extension data</button>
+          <button className="btn btn-ghost" onClick={onClear} disabled={!state.connected && !state.screenshots.length && !state.recordings.length}>Clear all extension data</button>
         </div>
       </section>
 

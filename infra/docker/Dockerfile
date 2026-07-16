@@ -37,7 +37,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY infra/docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV DISPLAY=:99

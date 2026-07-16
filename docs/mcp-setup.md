@@ -4,7 +4,7 @@
 
 This document records the implemented MCP architecture and the remaining rollout work. The local `stdio` server, Streamable HTTP entry point, recording/replay tools, deterministic comparison, direct export responses, VS Code configuration, and Copilot CLI workspace configuration are now implemented.
 
-Starting the Electron desktop app starts the data bridge on port 9231, not an MCP transport. VS Code or Copilot CLI reads its workspace configuration and spawns `mcp/stdio.mjs`; `mcp/http.mjs` must be started separately when Streamable HTTP is wanted. Both MCP entry points are adapters over the running Electron bridge and do not contain the durable recording state themselves. See [`docs/deployment-and-architecture.md`](docs/deployment-and-architecture.md) for the full process and deployment model.
+Starting the Electron desktop app starts the data bridge on port 9231, not an MCP transport. VS Code or Copilot CLI reads its workspace configuration and spawns `services/mcp/stdio.mjs`; `services/mcp/http.mjs` must be started separately when Streamable HTTP is wanted. Both MCP entry points are adapters over the running Electron bridge and do not contain the durable recording state themselves. See [`deployment-and-architecture.md`](deployment-and-architecture.md) for the full process and deployment model.
 
 The goal is to let an LLM:
 
@@ -380,30 +380,31 @@ If replay exceeds the tool timeout, return `runId` with `status: "queued" | "run
 
 ## Step 6 — implement the MCP server package
 
-Add a dedicated package, for example:
+The implemented service is:
 
 ```text
-mcp/
-  src/server.ts             shared tool registration
-  src/stdio.ts              local entry point
-  src/http.ts               Streamable HTTP entry point
-  src/network-watch.ts      recording/replay service client
-  src/schemas.ts            tool input/output schemas
-  test/                     contract and integration tests
+services/mcp/
+  server.mjs                shared tool registration and Zod schemas
+  stdio.mjs                 local stdio entry point
+  http.mjs                  Streamable HTTP entry point
+packages/bridge-client/
+  network-watch-client.mjs  local Electron bridge client
+test/
+  mcp-server.test.mjs       stdio/tool contract test
+  mcp-http.test.mjs         Streamable HTTP integration test
 ```
 
 Add `@modelcontextprotocol/sdk` and `zod`. Keep all stdout output clean in `stdio` mode because stdout is the JSON-RPC channel; diagnostics must go to stderr.
 
 The local MCP process can talk to the Network Watch service on `127.0.0.1`, but it should authenticate with a random per-install token stored outside source control. Do not weaken the existing extension-origin check to make MCP work. Give the extension bridge and MCP service distinct authenticated routes or listeners.
 
-Add scripts similar to:
+The root scripts are:
 
 ```json
 {
-  "mcp:build": "tsc -p mcp/tsconfig.json",
-  "mcp:stdio": "node mcp/dist/stdio.js",
-  "mcp:http": "node mcp/dist/http.js",
-  "mcp:inspect": "npx @modelcontextprotocol/inspector node mcp/dist/stdio.js"
+  "mcp:stdio": "node services/mcp/stdio.mjs",
+  "mcp:http": "node services/mcp/http.mjs",
+  "test:mcp": "node --test test/*.test.js test/*.test.mjs"
 }
 ```
 
@@ -421,7 +422,7 @@ After the MCP server is built, add:
     "network-watch": {
       "type": "stdio",
       "command": "node",
-      "args": ["${workspaceFolder}/mcp/dist/stdio.js"],
+      "args": ["${workspaceFolder}/services/mcp/stdio.mjs"],
       "env": {
         "NETWORK_WATCH_URL": "http://127.0.0.1:9232",
         "NETWORK_WATCH_TOKEN": "${input:networkWatchToken}"

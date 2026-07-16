@@ -2,11 +2,17 @@
 
 ## Load the extension
 
+When Network Watch launches its dedicated browser with **Start Browser**, this extension is loaded automatically from the bundled application resource.
+
+For a browser started separately:
+
 1. Start Network Watch so its local bridge is available on `127.0.0.1:9231`.
 2. Open `chrome://extensions` in Chrome.
 3. Enable **Developer mode**.
 4. Choose **Load unpacked**.
-5. Select this `website-analytics-extension` folder.
+5. Select this `apps/extension` folder.
+
+Publishing is not required for development or the dedicated Network Watch browser. Normal end-user Chrome installation requires Chrome Web Store or managed-enterprise distribution; see [`docs/extension-distribution.md`](../../docs/extension-distribution.md).
 
 ## Workflow
 

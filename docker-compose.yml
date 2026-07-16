@@ -2,7 +2,7 @@ services:
   network-inspector:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: infra/docker/Dockerfile
     image: network-inspector
     container_name: network-inspector
     environment: 
@@ -30,7 +30,7 @@ services:
   network-watch-mcp:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: infra/docker/Dockerfile
     image: network-inspector
     profiles: ["mcp"]
     network_mode: "service:network-inspector"

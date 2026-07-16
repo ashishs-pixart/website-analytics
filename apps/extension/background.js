@@ -448,6 +448,20 @@ async function claimMcpReplayJob() {
   }
 }
 
+async function claimBridgeCommand() {
+  let command;
+  try {
+    command = (await bridgeRequest('/api/extension-commands/next')).command;
+  } catch {
+    return false;
+  }
+  if (command?.type === 'RESET_EXTENSION') {
+    await resetExtension();
+    return true;
+  }
+  return false;
+}
+
 function debuggerTarget(tabId) {
   return { tabId };
 }
@@ -731,7 +745,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   const handlers = {
-    GET_STATE: async () => publicState(await bridgeConnected()),
+    GET_STATE: async () => {
+      await claimBridgeCommand();
+      return publicState(await bridgeConnected());
+    },
     START_RECORDING: startRecording,
     STOP_RECORDING: stopRecording,
     REPLAY: () => replayActions(message.recordingId),
@@ -768,17 +785,17 @@ chrome.debugger.onDetach.addListener(source => {
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create(MCP_REPLAY_ALARM, { periodInMinutes: 0.5 });
-  claimMcpReplayJob();
+  claimBridgeCommand().then(claimMcpReplayJob);
 });
 
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(MCP_REPLAY_ALARM, { periodInMinutes: 0.5 });
-  claimMcpReplayJob();
+  claimBridgeCommand().then(claimMcpReplayJob);
 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === MCP_REPLAY_ALARM) stateReady.then(claimMcpReplayJob);
+  if (alarm.name === MCP_REPLAY_ALARM) stateReady.then(() => claimBridgeCommand().then(claimMcpReplayJob));
 });
 
 chrome.alarms.create(MCP_REPLAY_ALARM, { periodInMinutes: 0.5 });
-stateReady.then(claimMcpReplayJob);
+stateReady.then(() => claimBridgeCommand().then(claimMcpReplayJob));

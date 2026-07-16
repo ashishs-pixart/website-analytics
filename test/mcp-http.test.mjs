@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { startNetworkWatchHttpServer } from '../mcp/http.mjs';
+import { startNetworkWatchHttpServer } from '../services/mcp/http.mjs';
 
 test('Streamable HTTP entry point exposes a health endpoint', async () => {
   const { listener } = startNetworkWatchHttpServer({ port: 0, host: '127.0.0.1' });

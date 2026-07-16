@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { NetworkWatchStore, actionDescription, normalizedRequestUrl } = require('../src/network-watch-store');
+const { NetworkWatchStore, actionDescription, normalizedRequestUrl } = require('../packages/store/src/network-watch-store');
 
 function addRequest(store, { id, wallTime, url, status = 200, method = 'GET', resourceType = 'Fetch' }) {
   store.addNetworkEvent({ type: 'request', requestId: id, wallTime, timestamp: wallTime, url, method, resourceType });

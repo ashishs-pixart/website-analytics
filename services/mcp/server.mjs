@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
-import { NetworkWatchClient } from './network-watch-client.mjs';
+import { NetworkWatchClient } from '../../packages/bridge-client/network-watch-client.mjs';
 
 function result(value, text = null) {
   return {

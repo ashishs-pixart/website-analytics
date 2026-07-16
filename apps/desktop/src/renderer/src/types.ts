@@ -68,6 +68,8 @@ export type StartBrowserResult = {
   executablePath: string;
   host: string;
   port: number;
+  extensionPath: string | null;
+  extensionLoaded: boolean;
 };
 
 export type ElementMetadata = {

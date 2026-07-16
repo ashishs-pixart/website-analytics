@@ -67,7 +67,7 @@ pnpm start
 
 This command does two things:
 
-1. Runs `pnpm run build:renderer`, which builds the React interface into `dist/renderer`.
+1. Runs `pnpm run build:renderer`, which builds the React interface into `apps/desktop/dist/renderer`.
 2. Runs Electron, which opens the Network Watch desktop app.
 
 When the app opens, it also starts its private local extension/data bridge at:
@@ -117,16 +117,20 @@ Then set Host to `localhost`, Port to `9222`, click **Scan**, select the page, a
 
 ## 5. Load the Website Analytics extension
 
-The extension is local and is loaded unpacked; it is not installed from the Chrome Web Store.
+If you used Network Watch's **Start Browser** button, the app loads its bundled extension automatically into the dedicated debug profile. Confirm the Website Analytics icon appears, then continue to the next section.
+
+If you started or selected another browser profile, load the extension unpacked:
 
 1. Use the same Chromium browser that Network Watch is connected to.
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked**.
-5. Select this repository's `website-analytics-extension` folder.
+5. Select this repository's `apps/extension` folder.
 6. Pin **Website Analytics for Network Watch** for easier access.
 
 After pulling project changes, return to `chrome://extensions` and click **Reload** on the extension card. This is important because the extension service worker creates the alarm used to claim MCP replay jobs.
+
+A packaged Electron installer also contains `apps/extension` as an unpacked runtime resource and supplies it to the browser started by Network Watch. Store publication is needed only when users must install/update the extension independently in their normal browser profile. See [extension distribution](extension-distribution.md).
 
 The extension works on normal `http` and `https` pages. Chrome internal pages and the Chrome Web Store cannot host its content script.
 
@@ -221,7 +225,7 @@ Open **MCP: Open User Configuration** in VS Code and add an absolute-path server
     "network-watch": {
       "type": "stdio",
       "command": "node",
-      "args": ["/absolute/path/to/network-watch/mcp/stdio.mjs"],
+      "args": ["/absolute/path/to/network-watch/services/mcp/stdio.mjs"],
       "env": {
         "NETWORK_WATCH_URL": "http://127.0.0.1:9231"
       }
@@ -256,7 +260,7 @@ cd "/path/to/network-watch"
 copilot
 ```
 
-The checked-in `.mcp.json` starts `mcp/stdio.mjs`, which provides:
+The checked-in `.mcp.json` starts `services/mcp/stdio.mjs`, which provides:
 
 - `list_recordings`
 - `get_recording`
@@ -337,4 +341,3 @@ Expected result: the renderer build completes, and the MCP tests validate tool d
 | `9222` by default | Chromium remote-debugging endpoint | Keep local and use only on trusted machines. |
 | `9231` | Private Network Watch desktop/extension/MCP bridge | Never expose publicly. |
 | `9232` by default | Optional Streamable HTTP MCP endpoint | Use only with a token, HTTPS, and appropriate deployment controls. |
-
