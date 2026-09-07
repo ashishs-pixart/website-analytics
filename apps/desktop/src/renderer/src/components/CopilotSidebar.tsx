@@ -1,4 +1,5 @@
 import { useEffect, useRef, type FormEvent } from 'react';
+import { MarkdownOutput } from './MarkdownOutput';
 
 type Props = {
   directory: string;
@@ -17,7 +18,7 @@ type Props = {
 };
 
 export function CopilotSidebar({ directory, output, running, stopping, canRun, chatDraft, onChatDraftChange, onSelectDirectory, onRun, onGeneratePrompt, onSendChat, onStop, onClose }: Props) {
-  const outputRef = useRef<HTMLPreElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
   const directoryName = directory.split(/[\\/]/).filter(Boolean).pop() || directory;
   useEffect(() => {
     if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
@@ -52,7 +53,7 @@ export function CopilotSidebar({ directory, output, running, stopping, canRun, c
         {running ? <button className="btn btn-danger" onClick={onStop} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</button> : null}
       </div>
       {!canRun && <p className="copilot-hint">Add a screenshot change note or record some events to create a prompt.</p>}
-      <pre className="copilot-terminal-output" ref={outputRef}>{output || 'Copilot output will appear here.'}</pre>
+      <MarkdownOutput output={output} ref={outputRef} />
       <div className="copilot-prompt-actions">
         <button className="btn btn-secondary" onClick={onGeneratePrompt} disabled={!directory || running || !canRun}>Generate Prompt</button>
         <button className="btn btn-ghost" onClick={onRun} disabled={!directory || running || !canRun}>Run all evidence</button>

@@ -7,7 +7,7 @@ The extension is a separate browser process component, but it does not always re
 | Use case | Publish separately? | Installation path |
 | --- | --- | --- |
 | Local development | No | Load `apps/extension` unpacked from `chrome://extensions`. |
-| Browser started by Network Watch | No | The Electron package bundles the extension and passes its extracted resource directory to Chromium with `--load-extension`. |
+| Browser started by Network Watch | No | Load the bundled directory once from `chrome://extensions`; the dedicated profile retains it. |
 | Internal managed company devices | Not necessarily public | Use Chrome enterprise force-install policy, or publish to a private Google Workspace domain. |
 | Selected external testers | Yes, if they use normal Chrome installation | Publish as Private trusted-testers or Unlisted in the Chrome Web Store. |
 | General users in their normal Chrome profile | Yes | Publish through the Chrome Web Store for installation, signing, review, and updates. |
@@ -37,14 +37,7 @@ Development: <repository>/apps/extension
 Packaged app: <Electron resources>/extension
 ```
 
-When the user clicks **Start Browser**, Electron starts a dedicated profile with:
-
-```text
---disable-extensions-except=<extension-directory>
---load-extension=<extension-directory>
-```
-
-This is deliberately limited to the browser profile Network Watch creates. It does not silently modify the user's normal Chrome profile.
+When the user clicks **Start Browser**, Electron starts a persistent dedicated profile and opens `chrome://extensions`. The user selects the packaged directory once with **Load unpacked**. This does not modify the user's normal Chrome profile, and avoids relying on restricted command-line extension-loading switches in stable Chrome.
 
 ## Why the extension cannot run inside Electron alone
 
@@ -57,4 +50,3 @@ The extension must observe and control the actual Chromium page where the user's
 3. For an internal organization, prefer private-domain publishing or enterprise policy.
 4. For external users, publish an Unlisted or Public Chrome Web Store item and let the desktop detect whether it is installed.
 5. Keep the store extension ID stable and add an update/migration plan before relying on persisted extension state.
-

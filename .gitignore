@@ -5,3 +5,11 @@ node_modules
 dist
 
 .DS_STORE
+
+deliverables
+
+dist
+
+.codex-build
+
+.codex*

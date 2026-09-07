@@ -4,6 +4,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
       <div id="modal">
         <h2>How to enable remote debugging</h2>
         <p>Launch your browser with the remote debugging flag, then click Scan.</p>
+        <p>For the manual extension fallback, in Chrome choose <strong>Load unpacked</strong> and select this project&apos;s <code>apps/extension</code> folder, which contains <code>manifest.json</code> (not the parent <code>apps</code> folder).</p>
         <div className="launch-commands">
           <div className="launch-cmd">
             <span className="browser-name">Chrome / Brave</span>

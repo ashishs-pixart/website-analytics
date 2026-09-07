@@ -144,9 +144,7 @@ export function App() {
       setStatus({ kind: 'idle', text: 'Browser started' });
       showToast(!result.extensionPath
         ? `Started ${result.browser}; extension bundle was not found`
-        : result.extensionLoaded
-          ? `Started ${result.browser}; Website Analytics is loaded (shown in Extensions)`
-          : `Started ${result.browser}; check the Website Analytics card shown in Extensions`);
+        : `Started ${result.browser}; load Website Analytics once from the folder shown by Reveal extension`);
     } finally {
       setLaunchingBrowser(false);
     }
@@ -175,9 +173,11 @@ export function App() {
   }, []);
 
   const clearRequests = useCallback(() => {
+    if (order.length && !window.confirm(`Clear all ${order.length} captured network request${order.length === 1 ? '' : 's'}?`)) return;
     dispatchCapture({ type: 'clear' });
     setSelectedId(null);
-  }, []);
+    showToast('Network capture cleared');
+  }, [order.length, showToast]);
 
   const openExport = useCallback(() => setShowExport(true), []);
 
@@ -188,6 +188,8 @@ export function App() {
   }, []);
 
   const clearExtensionData = useCallback(async () => {
+    const inspectItemCount = extensionState.screenshots.length + extensionState.recordings.length;
+    if (inspectItemCount && !window.confirm(`Clear all Inspect recordings, replay results, screenshots, and review notes? This cannot be undone.`)) return;
     const result = await window.cdp.clearExtensionData();
     if (result.ok) {
       setExtensionState(result.state);
@@ -196,7 +198,7 @@ export function App() {
       setElementFeedback({});
       showToast('Network Watch data cleared; the connected extension will reset shortly');
     }
-  }, [showToast]);
+  }, [extensionState.recordings.length, extensionState.screenshots.length, showToast]);
 
   const changeFeedback = useCallback((id: string, value: string) => {
     setScreenshotFeedback((current) => ({ ...current, [id]: value }));
@@ -405,7 +407,6 @@ export function App() {
         onScan={scanTargets}
         onAttach={attachSelected}
         onDetach={detach}
-        onClear={mode === 'network' ? clearRequests : clearExtensionData}
         onExport={openModeExport}
       />
       <ModeBar
@@ -421,9 +422,11 @@ export function App() {
             filterType={filterType}
             errorsOnly={errorsOnly}
             requestCount={filteredRequests.length}
+            totalCount={order.length}
             onFilterTextChange={setFilterText}
             onFilterTypeChange={setFilterType}
             onErrorsOnlyChange={setErrorsOnly}
+            onClear={clearRequests}
           />
           <main id="split-pane">
             <RequestTable requests={filteredRequests} totalCount={order.length} selectedId={selectedId} onSelect={setSelectedId} />

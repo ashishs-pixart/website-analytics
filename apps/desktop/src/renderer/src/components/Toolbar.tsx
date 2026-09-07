@@ -18,7 +18,6 @@ type ToolbarProps = {
   onScan: () => void;
   onAttach: () => void;
   onDetach: () => void;
-  onClear: () => void;
   onExport: () => void;
 };
 
@@ -38,13 +37,12 @@ export function Toolbar({
   onScan,
   onAttach,
   onDetach,
-  onClear,
   onExport,
 }: ToolbarProps) {
   return (
     <header id="toolbar">
       <div className="toolbar-left">
-        <div className="logo"><span className="logo-icon">NW</span><span className="logo-text">Network Inspector</span></div>
+        <div className="window-drag-region" aria-hidden="true" />
         <div className="connect-group">
           <label className="field-label">Host</label>
           <input id="inp-host" type="text" value={host} onChange={(event) => onHostChange(event.target.value)} spellCheck={false} disabled={connected} />
@@ -67,7 +65,6 @@ export function Toolbar({
       </div>
       <div className="toolbar-right">
         <span className={`badge badge-${status.kind}`}>{status.text}</span>
-        <button className="btn btn-ghost" onClick={onClear}>Clear</button>
         <button className="btn btn-ghost" onClick={onExport}>Export</button>
       </div>
     </header>

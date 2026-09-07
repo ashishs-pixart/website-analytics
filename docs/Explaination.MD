@@ -14,7 +14,7 @@ Network Watch is an Electron desktop application, a Chrome extension, and an MCP
 | Durable store (`packages/store/src/network-watch-store.js`) | Saves original recordings, replay runs, replay jobs, redacted request evidence, comparisons, and agent-facing exports. |
 | MCP server (`services/mcp/`) | Exposes recordings, replay, comparison, and exports as MCP tools through stdio or Streamable HTTP. |
 
-The Electron package includes `apps/extension` as an external runtime resource. **Start Browser** passes that directory with Chromium's `--load-extension` and `--disable-extensions-except` flags, so the dedicated debug profile receives the extension without a separate store installation.
+The Electron package includes `apps/extension` as an external runtime resource. **Start Browser** opens `chrome://extensions` in a persistent dedicated debug profile. The user loads the revealed extension folder once, and that profile retains it for later launches.
 
 ## 2. Desktop application startup and local bridge
 
@@ -42,7 +42,11 @@ The Electron package includes `apps/extension` as an external runtime resource. 
 4. Response bodies are not downloaded automatically. When the user requests one, the renderer asks Electron to call `Network.getResponseBody` through CDP and caches the result locally.
 5. Detaching a target closes the CDP connection and updates the UI status.
 
-### 3.3 Network exports
+### 3.3 Passive response security analysis
+
+The Network table computes a local security rating for each response. Document and API responses use different applicable checks. The analyzer reviews encrypted transport, browser security headers, CORS, cookie attributes, caching of sensitive responses, server disclosure, and error details. After a response body is loaded, it also inspects JSON key names for possible secret or personal-data exposure without displaying the corresponding values. The rating is evidence-based triage rather than proof that an endpoint is secure or vulnerable.
+
+### 3.4 Network exports
 
 The top-right **Export** button is mode-aware. In Network mode it opens the request export dialog; in Inspect mode it opens the improvement-prompt dialog. The application menu shortcut `Cmd/Ctrl+E` calls the same mode-aware function.
 

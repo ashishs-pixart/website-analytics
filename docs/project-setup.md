@@ -117,7 +117,7 @@ Then set Host to `localhost`, Port to `9222`, click **Scan**, select the page, a
 
 ## 5. Load the Website Analytics extension
 
-If you used Network Watch's **Start Browser** button, the app loads its bundled extension automatically into the dedicated debug profile. Confirm the Website Analytics icon appears, then continue to the next section.
+If you used Network Watch's **Start Browser** button, the app opens `chrome://extensions` in its dedicated debug profile. Enable **Developer mode**, click **Load unpacked**, then use **Reveal extension** in Network Watch to locate the folder. This is required only once for that browser profile.
 
 If you started or selected another browser profile, load the extension unpacked:
 
@@ -125,8 +125,10 @@ If you started or selected another browser profile, load the extension unpacked:
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked**.
-5. Select this repository's `apps/extension` folder.
+5. Select this repository's `apps/extension` folder itself — the folder containing `manifest.json` — rather than the parent `apps` folder or the `manifest.json` file.
 6. Pin **Website Analytics for Network Watch** for easier access.
+
+**Start Browser** launches the selected browser without first checking whether the debugging port is occupied. If the browser cannot bind that port, select a free port or click **Scan** to connect to an existing debug browser.
 
 After pulling project changes, return to `chrome://extensions` and click **Reload** on the extension card. This is important because the extension service worker creates the alarm used to claim MCP replay jobs.
 

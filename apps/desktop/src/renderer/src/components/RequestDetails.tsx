@@ -1,6 +1,7 @@
 import { DETAIL_TABS, type DetailTab } from '../constants';
 import type { NetworkRequest } from '../types';
 import { formatBytes, formatMs, requestDuration, statusClass, tryPrettyJson } from '../utils/format';
+import { analyzeRequestSecurity } from '../utils/security';
 import { HeadersTable } from './HeadersTable';
 
 type RequestDetailsProps = {
@@ -27,6 +28,7 @@ export function RequestDetails({ request, activeTab, setActiveTab, onLoadBody }:
   }
 
   const timing = request.timing || {};
+  const security = analyzeRequestSecurity(request);
   const phases = [
     ['DNS', timing.dnsStart, timing.dnsEnd],
     ['Connect', timing.connectStart, timing.connectEnd],
@@ -71,6 +73,47 @@ export function RequestDetails({ request, activeTab, setActiveTab, onLoadBody }:
           </div>
         )}
         {activeTab === 'request-body' && <div className="detail-pane active">{request.postData ? <pre>{tryPrettyJson(request.postData)}</pre> : <p className="k">No request body captured.</p>}</div>}
+        {activeTab === 'security' && (
+          <div className="detail-pane active security-analysis">
+            <div className={`security-summary security-${security.rating}`}>
+              <div><strong>{security.label}</strong><span>{security.score == null ? 'Waiting for response' : `${security.score}/100`}</span></div>
+              <p>Passive assessment of observable {security.scope} response controls. A high score does not prove the endpoint is secure.</p>
+            </div>
+            <div className="section security-coverage">
+              <h3>Assessment coverage</h3>
+              <div className="kv">
+                <div className="k">Response category</div><div>{security.scope === 'api' ? 'API / structured data' : security.scope === 'document' ? 'Browser document' : 'Static or supporting resource'}</div>
+                <div className="k">Transport evidence</div><div>{request.securityDetails ? 'TLS metadata captured' : request.url.startsWith('https:') || request.url.startsWith('wss:') ? 'Encrypted URL observed; detailed TLS metadata unavailable' : 'No encrypted transport observed'}</div>
+                <div className="k">Headers</div><div>{Object.keys({ ...request.responseHeaders, ...request.responseExtraHeaders }).length} response header{Object.keys({ ...request.responseHeaders, ...request.responseExtraHeaders }).length === 1 ? '' : 's'} assessed</div>
+                <div className="k">Response structure</div><div>{request.bodyCache == null ? 'Not assessed — load the response body to enable JSON and error-leakage checks' : request.bodyBase64 ? 'Skipped because the body is binary/base64' : 'Loaded body assessed locally'}</div>
+              </div>
+            </div>
+            <div className="section">
+              <h3>Observed findings</h3>
+              {security.findings.length ? <div className="security-findings">{security.findings.map((finding) => (
+                <article key={finding.id} className={`security-finding severity-${finding.severity}`}>
+                  <div><span>{finding.severity}</span><strong>{finding.title}</strong></div>
+                  <dl className="security-explanation">
+                    <div><dt>Observed</dt><dd>{finding.detail}</dd></div>
+                    <div><dt>Why it matters</dt><dd>{finding.impact}</dd></div>
+                    <div><dt>Recommended action</dt><dd>{finding.recommendation}</dd></div>
+                    <div><dt>Reference</dt><dd>{finding.standard}</dd></div>
+                  </dl>
+                </article>
+              ))}</div> : <p className="k">No issues were identified by these passive checks.</p>}
+            </div>
+            {security.positiveSignals.length > 0 && <div className="section"><h3>Signals and next steps</h3><ul className="security-signals">{security.positiveSignals.map(signal => <li key={signal}>{signal}</li>)}</ul></div>}
+            {request.securityDetails && <div className="section"><h3>TLS details</h3><div className="kv"><div className="k">Protocol</div><div>{request.securityDetails.protocol || '-'}</div><div className="k">Cipher</div><div>{request.securityDetails.cipher || '-'}</div><div className="k">Certificate</div><div>{request.securityDetails.subjectName || '-'}</div><div className="k">Issuer</div><div>{request.securityDetails.issuer || '-'}</div></div></div>}
+            <div className="section security-methodology">
+              <h3>How the rating works</h3>
+              <p>The score starts at 100 and deducts 35 points for Critical findings, 20 for High, 10 for Medium, and 4 for Low. Any Critical finding forces the overall rating to Critical.</p>
+              <div className="security-rating-key">
+                <span className="security-good">Good 85–100</span><span className="security-review">Review 65–84</span><span className="security-risky">Risky 40–64</span><span className="security-critical">Critical 0–39 or a critical finding</span>
+              </div>
+              <p className="k">These checks cannot prove authorization, authentication, server-side validation, dependency safety, exploitability, or business impact. Confirm findings with authorized security testing and application context.</p>
+            </div>
+          </div>
+        )}
         {activeTab === 'response-body' && (
           <div className="detail-pane active">
             {request.wsFrames.length > 0 && (

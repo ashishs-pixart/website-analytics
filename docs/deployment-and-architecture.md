@@ -65,7 +65,7 @@ The [custom agent](https://docs.github.com/en/copilot/how-tos/copilot-cli/custom
 docker compose up --build network-inspector
 ```
 
-Open `http://127.0.0.1:6080/vnc.html?autoconnect=1` to see the Electron desktop. Chromium is installed in the image, so **Start Browser** launches it in the same container, reaches its loopback CDP port, and automatically loads `/app/apps/extension` into the dedicated profile.
+Open `http://127.0.0.1:6080/vnc.html?autoconnect=1` to see the Electron desktop. Chromium is installed in the image, so **Start Browser** launches it in the same container and reaches its loopback CDP port. Load `/app/apps/extension` once from `chrome://extensions` in the dedicated profile.
 
 Compose binds VNC, noVNC, the extension bridge, and MCP ports to host loopback only. Application data is stored in the `network-watch-data` volume.
 

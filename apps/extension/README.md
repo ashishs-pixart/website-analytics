@@ -2,7 +2,7 @@
 
 ## Load the extension
 
-When Network Watch launches its dedicated browser with **Start Browser**, this extension is loaded automatically from the bundled application resource.
+When Network Watch launches its dedicated browser with **Start Browser**, it opens `chrome://extensions`. Enable **Developer mode**, choose **Load unpacked**, and select the folder shown by Network Watch's **Reveal extension** button. The dedicated profile retains the extension for future launches.
 
 For a browser started separately:
 
@@ -10,7 +10,7 @@ For a browser started separately:
 2. Open `chrome://extensions` in Chrome.
 3. Enable **Developer mode**.
 4. Choose **Load unpacked**.
-5. Select this `apps/extension` folder.
+5. Select this `apps/extension` folder itself, which contains `manifest.json`. Do not select the parent `apps` folder or the `manifest.json` file.
 
 Publishing is not required for development or the dedicated Network Watch browser. Normal end-user Chrome installation requires Chrome Web Store or managed-enterprise distribution; see [`docs/extension-distribution.md`](../../docs/extension-distribution.md).
 

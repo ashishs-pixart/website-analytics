@@ -371,37 +371,6 @@ function bundledExtensionPath() {
     : path.join(app.getAppPath(), 'apps', 'extension');
 }
 
-function inspectDebugTargets(port) {
-  return new Promise((resolve) => {
-    const request = http.get({ host: '127.0.0.1', port, path: '/json/list', timeout: 1500 }, (response) => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', (chunk) => { body += chunk; });
-      response.on('end', () => {
-        try {
-          resolve(JSON.parse(body));
-        } catch {
-          resolve([]);
-        }
-      });
-    });
-    request.on('timeout', () => request.destroy());
-    request.on('error', () => resolve([]));
-  });
-}
-
-async function confirmExtensionLaunch(port) {
-  // The Manifest V3 worker appears in CDP briefly as Chrome starts the extension.
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    const targets = await inspectDebugTargets(port);
-    if (targets.some((target) => target.type === 'service_worker' && String(target.url).startsWith('chrome-extension://'))) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function findInstalledBrowsers() {
   const browsers = [];
   const add = (id, name, executablePath) => {
@@ -436,6 +405,7 @@ function findInstalledBrowsers() {
 }
 
 ipcMain.handle('start-browser-debug', async (_event, { port = 9222 } = {}) => {
+  const debugPort = Number(port) || 9222;
   const browsers = findInstalledBrowsers();
 
   if (!browsers.length) {
@@ -455,7 +425,10 @@ ipcMain.handle('start-browser-debug', async (_event, { port = 9222 } = {}) => {
   if (result.response === buttons.length - 1) return { ok: false, canceled: true };
 
   const browser = browsers[result.response];
-  const debugPort = Number(port) || 9222;
+  const extensionPath = bundledExtensionPath();
+  const extensionAvailable = fileExists(path.join(extensionPath, 'manifest.json'));
+  // Keep one dedicated profile per browser so an extension loaded manually from
+  // chrome://extensions remains installed on subsequent debug launches.
   const profileDir = path.join(app.getPath('userData'), 'debug-profiles', browser.id);
   fs.mkdirSync(profileDir, { recursive: true });
 
@@ -464,12 +437,8 @@ ipcMain.handle('start-browser-debug', async (_event, { port = 9222 } = {}) => {
     '--remote-debugging-address=127.0.0.1',
     `--user-data-dir=${profileDir}`,
   ];
-  const extensionPath = bundledExtensionPath();
-  const extensionAvailable = fileExists(path.join(extensionPath, 'manifest.json'));
-  if (extensionAvailable) {
-    args.push(`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`);
-  }
-  // Show the card on first launch so a hidden toolbar icon is never mistaken for a failed load.
+  // Stable Chrome restricts command-line loading of unpacked extensions. Open
+  // its extension manager and let the user load this persistent profile once.
   args.push(extensionAvailable ? 'chrome://extensions/' : 'about:blank');
   if (process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
     args.unshift('--disable-dev-shm-usage', '--no-sandbox');
@@ -481,7 +450,6 @@ ipcMain.handle('start-browser-debug', async (_event, { port = 9222 } = {}) => {
       stdio: 'ignore',
     });
     child.unref();
-    const extensionLoaded = extensionAvailable && await confirmExtensionLaunch(debugPort);
     return {
       ok: true,
       browser: browser.name,
@@ -489,7 +457,6 @@ ipcMain.handle('start-browser-debug', async (_event, { port = 9222 } = {}) => {
       host: 'localhost',
       port: debugPort,
       extensionPath: extensionAvailable ? extensionPath : null,
-      extensionLoaded,
     };
   } catch (err) {
     return { ok: false, error: err.message };

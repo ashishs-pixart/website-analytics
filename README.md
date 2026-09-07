@@ -8,6 +8,7 @@ A production-ready Electron desktop app for inspecting browser network traffic t
 - Live request table with method, status, type, URL, size, and duration.
 - Filter by URL/method/status, resource type, and errors only.
 - Inspect request headers, response headers, request body, response body, timing, raw event data, and WebSocket frames.
+- Passively rate observable response security using transport, header, CORS, cookie, caching, error-leakage, and loaded JSON-structure checks based on OWASP guidance.
 - Export the currently filtered traffic as an importable Postman JSON collection or a readable Markdown (`.md`) file with selected request, response, header, payload, and timing fields.
 - Use the companion Chrome extension to record/replay journeys and regenerate their network traffic.
 - Simulate eleven fitted desktop, tablet, and mobile breakpoints, capture visible-viewport screenshots with selected-element HTML/CSS metadata, correlate requests to recorded actions, and export an LLM-ready improvement prompt.
@@ -23,6 +24,18 @@ Install these before the first test:
 - **Optional:** VS Code with MCP support, or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) for the agent workflow.
 
 Use a normal development profile or a dedicated test browser profile. Do not test on a website where replaying clicks, form input, or purchases would have real consequences.
+
+## Showcase frontend
+
+The repository includes **Signal Room**, a small React playground built specifically for demos. It sends real browser `fetch` requests to free, keyless APIs and includes successful GETs, a larger response, a JSON POST, a deliberate 404, and a repeated request for comparison.
+
+```bash
+pnpm demo
+```
+
+Open `http://localhost:4173`, connect Network Watch to that tab, and click **Run full scenario**. You can also open the browser DevTools Network panel to show the same requests natively. The app's request log displays client-measured status, payload size, and duration, while Network Watch provides the full request/response inspection, filtering, security analysis, replay, and export workflow.
+
+The **Dictionary search** uses the free Datamuse API and renders definitions from its live response. Search a few words to create an easy-to-follow request sequence; you can record those interactions with the Website Analytics extension when demonstrating action IDs, correlated requests, and replay comparisons in Network Watch's Inspect mode.
 
 ## First-time setup and end-to-end test
 
@@ -83,14 +96,12 @@ The desktop app must remain running and connected while you record/replay if you
 
 ### 3. Load the Website Analytics extension
 
-When Network Watch starts a browser through **Start Browser**, it now loads the bundled Website Analytics extension into that dedicated debug profile automatically. Packaged Electron builds include the extension as an external resource, so it does not have to be published separately for this managed browser workflow.
-
-If you connect Network Watch to a browser you started yourself, load the unpacked extension from [`apps/extension`](apps/extension):
+Network Watch opens `chrome://extensions` in its dedicated debug profile. Load the unpacked extension once in that profile; it remains installed on later debug launches. Packaged Electron builds include the same extension as an external resource.
 
 1. In the same Chromium browser, open `chrome://extensions`.
 2. Turn on **Developer mode**.
 3. Click **Load unpacked**.
-4. Select the `apps/extension` folder in this repository.
+4. Click **Reveal extension** in Network Watch and select the revealed folder (or select `apps/extension` when running from this repository).
 5. Pin the extension if you want quick access to its popup.
 
 After pulling changes to this project, click **Reload** on the extension card. The current version requires the `alarms` permission so it can claim MCP-triggered replay jobs.

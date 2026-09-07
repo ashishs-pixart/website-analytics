@@ -32,6 +32,16 @@ export type NetworkRequest = {
   failed: boolean;
   errorText: string;
   timing: Record<string, number> | null;
+  securityDetails?: {
+    protocol?: string;
+    keyExchange?: string;
+    cipher?: string;
+    certificateId?: number;
+    subjectName?: string;
+    issuer?: string;
+    validFrom?: number;
+    validTo?: number;
+  } | null;
   initiator: unknown;
   wsFrames: Array<{
     direction: 'sent' | 'received';
@@ -81,7 +91,6 @@ export type StartBrowserResult = {
   host: string;
   port: number;
   extensionPath: string | null;
-  extensionLoaded: boolean;
 };
 
 export type ElementMetadata = {

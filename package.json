@@ -9,6 +9,9 @@
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
     "build:renderer": "vite build --config vite.config.ts",
+    "demo": "vite --config apps/demo/vite.config.ts",
+    "build:demo": "vite build --config apps/demo/vite.config.ts",
+    "typecheck:demo": "tsc -p apps/demo/tsconfig.json",
     "mcp:stdio": "node services/mcp/stdio.mjs",
     "mcp:http": "node services/mcp/http.mjs",
     "test:mcp": "node --test test/*.test.js test/*.test.mjs",

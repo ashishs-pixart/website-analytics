@@ -60,6 +60,7 @@ export function applyEventToRequest(current: NetworkRequest, event: NetworkEvent
     req.remoteIPAddress = event.remoteIPAddress;
     req.remotePort = event.remotePort;
     req.timing = event.timing;
+    req.securityDetails = event.securityDetails || null;
     req.resourceType = event.resourceType || req.resourceType;
   } else if (event.type === 'response-extra') {
     req.responseExtraHeaders = event.headers || {};
