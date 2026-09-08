@@ -2,9 +2,9 @@ name: Validate and package Network Watch
 
 on:
   pull_request:
-    branches: ["master"]
+    branches: ["main", "master"]
   push:
-    branches: ["master"]
+    branches: ["main", "master"]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -126,7 +126,8 @@ jobs:
     needs: package
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'push' &&
+        (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
       (github.event_name == 'workflow_dispatch' && inputs.publish_release)
     runs-on: ubuntu-latest
     permissions:
@@ -147,7 +148,7 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/master" ]]; then
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && ( "$GITHUB_REF" == "refs/heads/main" || "$GITHUB_REF" == "refs/heads/master" ) ]]; then
             package_version="$(node -p "require('./package.json').version")"
             echo "tag=v${package_version}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           else

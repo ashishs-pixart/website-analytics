@@ -96,7 +96,7 @@ The workflow has three responsibilities:
 
 1. `quality` runs on pull requests, branch pushes, tags, and manual runs. It installs with Node 20 and pnpm 10, type-checks, runs store/MCP tests, builds the renderer, and builds the Docker image.
 2. `package` runs only outside pull requests and creates Linux, Windows, and macOS Electron artifacts.
-3. `publish` runs after every successful push to `master`, for `v*` tags, or when a manual workflow explicitly enables `publish_release`. A `master` commit uses a deterministic `v<package-version>-<short-sha>` release tag, so the Linux, Windows, and macOS packages for that commit stay together in one GitHub release.
+3. `publish` runs after every successful push to `main` or `master`, for `v*` tags, or when a manual workflow explicitly enables `publish_release`. A branch commit uses a deterministic `v<package-version>-<short-sha>` release tag, so the Linux, Windows, and macOS packages for that commit stay together in one GitHub release.
 
 Packaging remains unsigned unless signing and notarization secrets are added.
 
