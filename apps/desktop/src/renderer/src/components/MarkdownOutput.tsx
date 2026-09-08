@@ -30,7 +30,10 @@ export const MarkdownOutput = forwardRef<HTMLDivElement, { output: string }>(fun
           const List = block.ordered ? 'ol' : 'ul';
           return <List key={key}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{inlineContent(item)}</li>)}</List>;
         }
-        return <div className="copilot-table-wrap" key={key}><table><thead><tr>{block.headers.map((cell, cellIndex) => <th key={cellIndex}>{inlineContent(cell)}</th>)}</tr></thead><tbody>{block.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{inlineContent(cell)}</td>)}</tr>)}</tbody></table></div>;
+        if (block.type === 'table') {
+          return <div className="copilot-table-wrap" key={key}><table><thead><tr>{block.headers.map((cell, cellIndex) => <th key={cellIndex}>{inlineContent(cell)}</th>)}</tr></thead><tbody>{block.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{inlineContent(cell)}</td>)}</tr>)}</tbody></table></div>;
+        }
+        return null;
       })}
     </div>
   );
